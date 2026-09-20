@@ -1,0 +1,28 @@
+{
+  "name": "empress",
+  "version": "0.1.0",
+  "description": "EMPRESS — a fully-automatic development harness on pi (local tasks, local git, Jev judgments)",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "bin": {
+    "empress": "bin/empress.js"
+  },
+  "pi": {
+    "extensions": ["./src/extension"],
+    "prompts": ["./src/prompts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "DESIGN.md"
+  ]
+}

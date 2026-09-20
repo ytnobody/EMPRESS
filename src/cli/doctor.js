@@ -1,0 +1,56 @@
+// `empress doctor`: prerequisite / environment checks.
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { EMPRESS_DIR } from "../shared/config.js";
+import { run } from "../shared/shell.js";
+import { isGitRepo } from "../domain/git.js";
+import { jevAvailable } from "../domain/jev.js";
+
+export async function doctor(cwd) {
+  const checks = [];
+  const okChecks = [];
+
+  const gitRes = run("git", ["--version"]);
+  const gitOk = gitRes.code === 0;
+  checks.push(["git available", gitOk, gitOk ? "" : gitRes.stderr || "git not found"]);
+  if (gitOk) okChecks.push("git");
+
+  const repoOk = isGitRepo(cwd);
+  checks.push(["cwd is a git repo", repoOk, repoOk ? "" : "not inside a git repository"]);
+
+  const configExists = fs.existsSync(path.join(cwd, EMPRESS_DIR, "empress.toml")) || fs.existsSync(path.join(cwd, "empress.toml"));
+  checks.push(["empress.toml present", configExists, configExists ? "" : "run `empress init`"]);
+
+  const tasksDir = fs.existsSync(path.join(cwd, EMPRESS_DIR, "tasks"));
+  checks.push([".empress/tasks present", tasksDir, tasksDir ? "" : "run `empress init`"]);
+
+  const chariotRes = run("chariot", [], { timeout: 2000 });
+  const chariotOk = chariotRes.code === 0 || chariotRes.code === 2; // usage print exits 2
+  checks.push(["chariot (Jev CLI) available", chariotOk, chariotOk ? "" : "chariot not on PATH. Install from ../CHARIOT. (Optional — falls back to rules.)"]);
+
+  const jev = jevAvailable();
+  checks.push(["TYPESAFE_API_KEY set", jev.apiKey, jev.apiKey ? "" : "Jev judgments disabled (falls back to deterministic rules)"]);
+
+  const rolePrompts = fs.existsSync(path.join(cwd, EMPRESS_DIR, "agents", "superintendent.md")) && fs.existsSync(path.join(cwd, EMPRESS_DIR, "agents", "engineer.md"));
+  checks.push(["role prompts present", rolePrompts, rolePrompts ? "" : "run `empress init`"]);
+
+  const piRes = run("pi", ["--version"]);
+  checks.push(["pi available", piRes.code === 0, piRes.code === 0 ? "" : "pi not found"]);
+
+  let allOk = true;
+  let warnOnly = 0;
+  for (const [name, pass, msg] of checks) {
+    const kind = name.startsWith("chariot") || name.startsWith("TYPESAFE") ? (pass ? "ok" : "warn") : pass ? "ok" : "fail";
+    if (kind === "warn") warnOnly++;
+    if (kind === "fail") allOk = false;
+    const mark = kind === "ok" ? "✓" : kind === "warn" ? "⚠" : "✗";
+    console.log(`${mark} ${name}${msg ? `\n    ${msg}` : ""}`);
+  }
+
+  const env = ["GIT", ...(chariotOk ? [] : ["CHARIOT"]), jev.apiKey ? "JEV" : "", "PI"].filter(Boolean);
+  console.log(`\nReady: ${env.join(", ")}`);
+  if (!allOk) {
+    console.log("Some checks failed. See notes above.");
+    process.exitCode = warnOnly < checks.length ? 1 : 0;
+  }
+}
