@@ -26,6 +26,7 @@ import {
   isGitRepo,
 } from "../domain/git.js";
 import { runProjectCi } from "../domain/ci.js";
+import { runVulnCheck } from "../domain/vuln.js";
 import { evaluateRisk } from "../domain/risk.js";
 import { checkReadiness } from "../domain/readiness.js";
 import { getLessons, addLesson } from "../domain/lessons.js";
@@ -361,6 +362,21 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params) {
       const t = closeTask(projectDir(), params.id, params.note || "");
       return { content: [{ type: "text", text: t ? JSON.stringify({ success: true, status: t.status }) : "not found" }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "empress_vuln_check",
+    label: "Empress Vuln Check",
+    description: "Deterministic dependency vulnerability scan (govulncheck / npm audit / pip-audit, auto-detected by stack). Returns findings sorted by severity. Run before landing any change touching dependencies.",
+    parameters: Type.Object({
+      cwd: Type.Optional(Type.String({ description: "project dir to scan (default: resolved project root)" })),
+    }),
+    async execute(_id, params) {
+      const dir = params?.cwd ? path.resolve(projectDir(), params.cwd) : projectDir();
+      const r = runVulnCheck(dir);
+      const lines = r.ok ? [r.summary ?? "", ...r.findings.map((f) => `[${f.severity}]${f.isDirect ? " (direct)" : ""} ${f.name} ${f.range}${f.fixAvailable ? " [fix available]" : ""}`)].slice(0, 50) : [r.error];
+      return { content: [{ type: "text", text: lines.join("\n") }] };
     },
   });
 

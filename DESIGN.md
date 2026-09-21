@@ -269,9 +269,9 @@ The role prompts in `src/agents/` are the pi-native replacement for HERMIT's
 `CLAUDE.md`. They are appended to every relevant pi invocation with
 `--append-system-prompt`.
 
-**Enforced coding conventions.** EMPRESS bakes in two complementary project
-conventions (ports of the user's `pure-function-testing` skill and the `ponytail`
-plugin, in `src/agents/`):
+**Enforced coding conventions.** EMPRESS bakes in three complementary project
+conventions (ports of the user's `pure-function-testing` skill, the `ponytail`
+plugin, and the `app-security-review`/`vuln-check` skills, in `src/agents/`):
 
 1. **Pure Function Testing / Command Verification** (`coding-guidelines.md`) —
    *what we verify*: verification arithmetic (tests derive expected values from
@@ -286,10 +286,18 @@ plugin, in `src/agents/`):
    `ponytail:` comment with a ceiling + upgrade path, harvested into a debt
    ledger by `empress_ponytail_debt`.
 
-Together: **build the laziest correct thing, and verify it as arithmetic, not
-by retracing it.** The Superintendent enforces both — it reviews the design doc
-and spec-derived tests (PFT) **and** runs a Ponytail simplicity pass
-(`delete`/`stdlib`/`native`/`yagni`/`shrink`) on every diff before a task is
+3. **Security** (`coding-guidelines-security.md`) — *what we never compromise*:
+   trust-boundary validation, secrets, auth/authz, injection, dependency CVEs.
+   Includes the deterministic `empress_vuln_check` tool (`src/domain/vuln.js`:
+   auto-detects go/npm/pip, runs govulncheck / npm audit / pip-audit; pure
+   detection + parsing, command-verified by `test/vuln.test.mjs`).
+
+Together: **build the laziest correct thing, verify it as arithmetic, and never
+be lazy about security.** The Superintendent enforces all three — it reviews the
+design doc and spec-derived tests (PFT), runs a Ponytail simplicity pass
+(`delete`/`stdlib`/`native`/`yagni`/`shrink`), runs a Security pass
+(`empress_vuln_check` first, then `auth`/`authz`/`injection`/`secrets` tags;
+HIGH or trust-boundary findings hold the landing for a human) — before a task is
 considered ready to land, and tracks `ponytail:` debt.
 
 **Superintendent** (coordinator only — hard prohibition on editing files it

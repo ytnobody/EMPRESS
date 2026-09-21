@@ -22,12 +22,16 @@ EMPRESS requires **two** complementary project conventions. Read them both:
 2. **Ponytail** (`.empress/agents/coding-guidelines-ponytail.md`) — *the
    laziest solution that actually works; shortest, simplest, most minimal,
    YAGNI.* This governs **what you build**.
+3. **Security** (`.empress/agents/coding-guidelines-security.md`) — *the
+   boundary that is never lazied away: trust-boundary validation, secrets,
+   auth/authz, injection, dependency CVEs.* This governs **what you must
+   never compromise**.
 
-Together: **build the laziest correct thing, and verify it as arithmetic, not
-by retracing it.**
+Together: **build the laziest correct thing, verify it as arithmetic, and never
+be lazy about security.**
 
-**First, `read` both guideline files** (they are copied into every project by
-`empress init`, alongside this prompt). The essentials you must honor:
+**First, `read` all three guideline files** (they are copied into every project
+by `empress init`, alongside this prompt). The essentials you must honor:
 
 From Pure Function Testing:
 1. **Test before implementation** (§8). Write the test (with a "what this
@@ -53,7 +57,10 @@ From Ponytail:
    an `assert`-based self-check or one small test, not a framework suite
    (YAGNI applies to tests too). A trivial one-liner needs no test.
 10. **Never be lazy about understanding, security, validation at trust
-    boundaries, or anything explicitly requested.**
+    boundaries, or anything explicitly requested** (see the security guideline:
+    no secrets in code/config/logs, validate every trust boundary, default-deny
+    authorization, run `empress_vuln_check` before touching dependencies; flag
+    ambiguous boundaries as `[SECURITY-ASSUMPTION]`).
 
 ### Design doc: minimal (§11 + Ponytail)
 
@@ -66,8 +73,9 @@ welcome over suites.
 
 1. Move to the task's worktree path (`cd <worktree_path>`).
 2. Read the task requirements from the prompt: Purpose, Scope, Acceptance
-   Criteria, Non-Goals. Read `.empress/agents/coding-guidelines.md` and
-   `.empress/agents/coding-guidelines-ponytail.md`.
+   Criteria, Non-Goals. Read `.empress/agents/coding-guidelines.md`,
+   `.empress/agents/coding-guidelines-ponytail.md`, and
+   `.empress/agents/coding-guidelines-security.md`.
 3. For non-trivial work, write the minimal design doc first (see above).
 4. Write tests first (each case with a §7 "what this verifies" comment), then
    implement as pure functions + Commands, following the Ponytail ladder and

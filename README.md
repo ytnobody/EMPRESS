@@ -138,14 +138,19 @@ empress run (Node driver, tick loop)
 
 ## Development conventions (baked in)
 
-Engineers follow two rules (`.empress/agents/coding-guidelines.md` +
-`coding-guidelines-ponytail.md`):
+Engineers follow three rules (`.empress/agents/coding-guidelines.md` +
+`coding-guidelines-ponytail.md` + `coding-guidelines-security.md`):
 
 - **Pure Function Testing / Command Verification** — tests are verification
   arithmetic (spec-derived, not implementation-tracing), tests come first,
   non-trivial work gets a design doc before tests.
 - **Ponytail** — the laziest solution that works (YAGNI, stdlib-first); deliberate
   shortcuts carry a `ponytail:` comment harvested by `empress_ponytail_debt`.
+- **Security** — the boundary that is never lazied away (trust-boundary
+  validation, secrets, auth/authz, injection, dependency CVEs). The
+  Superintendent runs a security pass (`empress_vuln_check` first, then a diff
+  review with `auth`/`authz`/`injection`/`secrets`/… tags) before every landing;
+  HIGH or trust-boundary findings hold the merge for a human.
 
 ## Project layout
 
