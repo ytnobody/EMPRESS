@@ -117,7 +117,7 @@ empress version                    Print version
 
 Supported flags:
 - `empress task "<title>" --purpose "…" --scope "…" --acceptance "…" --nongoal "…"` (set the task's Purpose / Scope / Acceptance Criteria / Non-Goals) and `--remove <id>` (delete a task).
-- `empress run --thinking <level>` (reasoning effort) and `--interval <seconds>` (override the tick interval) in addition to `--once` / `--model M`.
+- `empress run --thinking <level>` (reasoning effort) in addition to `--once` / `--model M`. The wake cadence comes from `[run] wake_interval`.
 - `empress init` mirrors the interactive prompts as flags: `--base_branch` `--test_command` `--max_engineers` `--loop_interval` `--language` (non-interactive when all are provided).
 ```
 
