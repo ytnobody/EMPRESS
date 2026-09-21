@@ -107,12 +107,18 @@ with a review comment, never auto-merged.
 ## 5. Operations
 
 ```
+empress init [flags]               Scaffold .empress config + role prompts
 empress task "<title>" [flags]     Create a task
-empress list [--all]               List tasks
+empress list [--all]               List open tasks
 empress run [--once] [--model M]   Event-driven loop / single pass
 empress pause | resume | quit | status   Control autonomous operation
 empress doctor                     Check prerequisites
 empress version                    Print version
+
+Supported flags:
+- `empress task "<title>" --purpose "…" --scope "…" --acceptance "…" --nongoal "…"` (set the task's Purpose / Scope / Acceptance Criteria / Non-Goals) and `--remove <id>` (delete a task).
+- `empress run --thinking <level>` (reasoning effort) in addition to `--once` / `--model M`. The wake cadence comes from `[run] wake_interval`.
+- `empress init` mirrors the interactive prompts as flags: `--base_branch` `--test_command` `--max_engineers` `--loop_interval` `--language` (non-interactive when all are provided).
 ```
 
 Long unattended runs: put `empress run` under systemd (user service) or tmux.
