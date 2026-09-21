@@ -261,6 +261,28 @@ without a real container). If a configured engine is unavailable it falls back
  to the host — the same graceful degradation as Jev. Host secrets are never
 injected; container root maps to the host user via the rootless subuid range.
 
+### 7.2 Review triage (cheap, Jev-gated)
+
+Before the deep LLM review, `empress_triage_review` decides whether one is
+even needed — a cheapest-first ladder (L1 free, L2 only when Jev is available):
+
+1. **Deterministic (always):** secret/dangerous-pattern scan of the diff
+   (`scanDiff`), a PFT §9 convention signal (code changed without tests), and
+   the existing dependency vuln scan.
+2. **Jev (only if `TYPESAFE_API_KEY` is set):** a *single* `noul` call — "does
+   this change warrant human review?" (`src/domain/triage.js`; the questions
+   and decision thresholds are pure functions, verified by
+   `test/triage.test.mjs` without network).
+3. **LLM (Superintendent):** everything escalated here gets the full
+   PFT/Ponytail/Security review.
+
+Safety invariants: a deterministic hit always escalates regardless of what Jev
+says; Jev error/unavailability escalates (never auto-passes; `degraded` keeps
+behavior identical to the no-Jev case); and `signal: ok` never exempts HIGH /
+trust-boundary / control-plane changes — those are always fully reviewed. The
+result is: when Jev is available, only genuinely clear LOW/MEDIUM diffs are
+fast-pathed; otherwise behavior is exactly today's full review.
+
 ---
 
 ## 8. Superintendent & Engineer Roles

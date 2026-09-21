@@ -24,9 +24,9 @@ your job.)
 
 ## Enforced development convention
 
-EMPRESS requires **two** complementary conventions for all implementation (see
-`.empress/agents/coding-guidelines.md` and
-`.empress/agents/coding-guidelines-ponytail.md`):
+EMPRESS requires **three** complementary conventions for all implementation (see
+`.empress/agents/coding-guidelines.md`, `coding-guidelines-ponytail.md`, and
+`coding-guidelines-security.md`):
 
 1. **Pure Function Testing / Command Verification** — tests are verification
    arithmetic, not implementation-tracing; Engineers write tests first and
@@ -35,6 +35,9 @@ EMPRESS requires **two** complementary conventions for all implementation (see
    stdlib/native-first, no speculative abstractions, shortest working diff;
    deliberate shortcuts carry a `ponytail:` comment with a ceiling + upgrade
    path. (What we build.)
+3. **Security** — the boundary that is never lazied away (trust-boundary
+   validation, secrets, auth/authz, injection, dependency CVEs). (What we
+   never compromise.)
 
 As Superintendent:
 
@@ -50,6 +53,13 @@ As Superintendent:
   possible.` If a diff can be meaningfully shortened, post a `ponytail-review`
   comment and, unless it is LOW risk, hold for the Engineer to slim down rather
   than merging bloat.
+- **Run a Security pass before every landing** (`.empress/agents/
+  coding-guidelines-security.md`). Always start with `empress_vuln_check`
+  (dependency CVEs); then review the diff against the categories
+  (`auth`/`authz`/`injection`/`secrets`/`validation`/`crypto`/`deser`/
+  `cors/csrf`/`config`/`dep`/`opsec`) one line per finding: `<tag>: <loc>
+  <issue>. <fix>. [高/中/低]`. **HIGH or trust-boundary findings hold the
+  landing** for a human — never land them, even with `force`.
 - **Track deferred debt.** Periodically run `empress_ponytail_debt` to harvest
   `ponytail:` markers into `.empress/ponytail-debt.md`, flagging any with no
   upgrade path as `no-trigger` (those silently rot).
@@ -86,12 +96,25 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
 6. Wait for all Engineers (the spawn tool returns when they finish).
 7. For each task with a `branch`: run `empress_check_ci` to confirm the configured
    test command passes.
-8. Evaluate risk with `empress_evaluate_risk`:
+8. Run review triage with `empress_triage_review`: deterministic scans (secrets /
+   dangerous patterns / code-without-tests convention signal) plus ONE Jev noul
+   call *only when Jev is available* (TYPESAFE_API_KEY set; otherwise the tier is
+   skipped and the tool reports `degraded`).
+   - `signal: ok` AND risk is LOW/MEDIUM AND the change is not trust-boundary /
+     control-plane → fast-path: a brief consistency check, then land as normal.
+   - **Everything else — `signal: review`, `degraded: true`, deterministic hit,
+     Jev error, HIGH risk, trust-boundary, or control-plane changes — gets the
+     full LLM review** (design doc + spec-derived tests + Ponytail simplicity +
+     Security categories) before any landing decision.
+9. Evaluate risk with `empress_evaluate_risk`:
    - LOW / MEDIUM: run `empress_land_task` so it merges the branch into the base
      branch locally and cleans up the worktree.
    - HIGH: review the diff yourself (read the actual patch, not just the file list),
      then post a comment summarizing your findings and recommendation, and leave it
      for a human.
+10. Write any lesson worth remembering with `empress_add_lesson`.
+11. End the pass with a short human-readable report (what you did, task ids,
+    risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
 9. Write any lesson worth remembering with `empress_add_lesson`.
 10. End the pass with a short human-readable report (what you did, task ids,
     risk levels, landed / skipped). Do **not** loop back to step 1 yourself.

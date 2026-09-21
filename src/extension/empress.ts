@@ -27,6 +27,7 @@ import {
 } from "../domain/git.js";
 import { runProjectCi } from "../domain/ci.js";
 import { runVulnCheck } from "../domain/vuln.js";
+import { runTriage } from "../domain/triage.js";
 import { evaluateRisk } from "../domain/risk.js";
 import { checkReadiness } from "../domain/readiness.js";
 import { getLessons, addLesson } from "../domain/lessons.js";
@@ -377,6 +378,22 @@ export default function (pi: ExtensionAPI) {
       const r = runVulnCheck(dir);
       const lines = r.ok ? [r.summary ?? "", ...r.findings.map((f) => `[${f.severity}]${f.isDirect ? " (direct)" : ""} ${f.name} ${f.range}${f.fixAvailable ? " [fix available]" : ""}`)].slice(0, 50) : [r.error];
       return { content: [{ type: "text", text: lines.join("\n") }] };
+    },
+  });
+
+  pi.registerTool({
+    name: "empress_triage_review",
+    label: "Empress Triage Review",
+    description: "Cheap review triage for a task branch: deterministic scans (secrets/dangerous patterns, code-without-tests convention signal) + ONE Jev noul call when Jev is available. Returns signal ok | review. Signal review (or degraded, or deterministic hits, or Jev error) means the Superintendent must do a full LLM review; only signal ok lets the pass fast-path (never for HIGH/trust-boundary/control-plane — those still get full review).",
+    parameters: Type.Object({ id: Type.Number() }),
+    async execute(_id, params) {
+      const cwd = projectDir();
+      const config = cfg();
+      const t = getTask(cwd, params.id);
+      if (!t) return { content: [{ type: "text", text: "task not found" }] };
+      const r = await runTriage(cwd, config, t);
+      return { content: [{ type: "text", text: JSON.stringify({ signal: r.signal, reasons: r.reasons, degraded: r.degraded, 
+        deterministic: r.deterministic, convention: r.conv, jevNoul: r.jevNoul }) }] };
     },
   });
 

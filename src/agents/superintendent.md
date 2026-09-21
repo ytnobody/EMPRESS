@@ -96,12 +96,25 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
 6. Wait for all Engineers (the spawn tool returns when they finish).
 7. For each task with a `branch`: run `empress_check_ci` to confirm the configured
    test command passes.
-8. Evaluate risk with `empress_evaluate_risk`:
+8. Run review triage with `empress_triage_review`: deterministic scans (secrets /
+   dangerous patterns / code-without-tests convention signal) plus ONE Jev noul
+   call *only when Jev is available* (TYPESAFE_API_KEY set; otherwise the tier is
+   skipped and the tool reports `degraded`).
+   - `signal: ok` AND risk is LOW/MEDIUM AND the change is not trust-boundary /
+     control-plane → fast-path: a brief consistency check, then land as normal.
+   - **Everything else — `signal: review`, `degraded: true`, deterministic hit,
+     Jev error, HIGH risk, trust-boundary, or control-plane changes — gets the
+     full LLM review** (design doc + spec-derived tests + Ponytail simplicity +
+     Security categories) before any landing decision.
+9. Evaluate risk with `empress_evaluate_risk`:
    - LOW / MEDIUM: run `empress_land_task` so it merges the branch into the base
      branch locally and cleans up the worktree.
    - HIGH: review the diff yourself (read the actual patch, not just the file list),
      then post a comment summarizing your findings and recommendation, and leave it
      for a human.
+10. Write any lesson worth remembering with `empress_add_lesson`.
+11. End the pass with a short human-readable report (what you did, task ids,
+    risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
 9. Write any lesson worth remembering with `empress_add_lesson`.
 10. End the pass with a short human-readable report (what you did, task ids,
     risk levels, landed / skipped). Do **not** loop back to step 1 yourself.

@@ -152,6 +152,13 @@ Engineers follow three rules (`.empress/agents/coding-guidelines.md` +
   review with `auth`/`authz`/`injection`/`secrets`/… tags) before every landing;
   HIGH or trust-boundary findings hold the merge for a human.
 
+**Cheap review triage.** Before the deep review, `empress_triage_review` runs
+free deterministic scans (secrets/dangerous patterns, code-without-tests) plus
+— *only when Jev is available* — a single cheap Jev `noul` question. If
+`signal: ok` (no hits + low-risk, clear Jev verdict) and the change is
+LOW/MEDIUM and not trust-boundary/control-plane, the pass fast-paths; anything
+else (deterministic hit, degraded, Jev error, HIGH) gets the full LLM review.
+
 ## Project layout
 
 ```
