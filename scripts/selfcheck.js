@@ -44,6 +44,14 @@ if (!cfg.file) {
   console.log(`config ok: ${path.relative(root, cfg.file)}`);
 }
 
+  try {
+    execFileSync(process.execPath, ["--test", "test/*.test.mjs"], { stdio: "inherit" });
+    console.log("unit tests: PASS");
+  } catch (e) {
+    console.error(`unit tests FAIL: ${e.message}`);
+    failures++;
+  }
+
 if (failures > 0) {
   console.error(`selfcheck FAILED: ${failures} error(s)`);
   process.exit(1);
