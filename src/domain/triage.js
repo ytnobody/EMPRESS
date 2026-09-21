@@ -118,7 +118,9 @@ export async function runTriage(cwd, config, task, opts = {}) {
   const deterministic = scanDiff(patch);
   const conv = conventionSignals(patch ? extractChangedPaths(patch) : []);
 
-  const available = opts.forceJev !== false && jevAvailable().available;
+  // forceJev: true really forces the Jev tier (env-independent for tests);
+  // otherwise gate on the ambient key (missing key => degraded deterministic).
+  const available = opts.forceJev === true ? true : jevAvailable().available;
   let jevNoul = null;
   let jevError = false;
   if (available) {
