@@ -119,7 +119,7 @@ export async function runLoop(cwd, { model, thinking, once = false } = {}) {
     const now = Date.now();
     const auditDue = auditEnabled && now - lastAuditAt >= auditMs;
     const hash = tasksHash(cwd);
-    const changed = prevHash !== null && hash !== prevHash;
+    const changed = prevHash === null || hash !== prevHash; // first tick checks too
     prevHash = hash;
 
     // If nothing happened and no audit is due, sleep — zero LLM, zero Jev.
@@ -131,7 +131,7 @@ export async function runLoop(cwd, { model, thinking, once = false } = {}) {
     if (changed && !auditDue) {
       const actionable = listTasks(cwd);
       if (actionable.length === 0) {
-        console.log(`\n[wake ${new Date().toISOString()}] tasks dir changed but no actionable tasks — skip (zero LLM)`);
+        console.log(`\n[wake ${new Date().toISOString()}] queue changed but no actionable tasks — skip (zero LLM)`);
         patchLoopState(cwd, { last_skip_reason: "tasks changed, none actionable" });
       } else {
         // preflight: ONE Jev batch call; spawn LLM only if something is ready
