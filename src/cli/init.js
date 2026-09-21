@@ -39,6 +39,14 @@ branch_prefix = "empress/task"
 [jev]
 model = "jev-latest"
 
+# CI gate execution backend. engine = host (default), podman, or docker.
+# When a container engine + image is set, the test_command runs inside it
+# (isolated); falls back to host if the engine is unavailable.
+[ci]
+engine = "host"
+image = ""
+network = "default"   # default | none | host
+
 [risk]
 use_jev = true
 high_file_threshold = 20

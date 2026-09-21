@@ -250,6 +250,17 @@ branch using:
 requires the test command to pass, then merges the branch into the configured
 base branch and cleans up the worktree/branch, and records a lesson.
 
+### 7.1 CI gate execution (native, optional container isolation)
+
+The "CI" is the project's `test_command` run as a land gate. `src/domain/ci.js`
+runs it either on the host or inside an isolated container, selected by `[ci]`
+in `empress.toml` (`engine = host|podman|docker`, `image`, `network`). The
+worktree mounts at `/project:rw` and `test_command` runs inside the container
+(`buildContainerArgs` is a pure command-builder, verified by `test/ci.test.mjs`
+without a real container). If a configured engine is unavailable it falls back
+ to the host — the same graceful degradation as Jev. Host secrets are never
+injected; container root maps to the host user via the rootless subuid range.
+
 ---
 
 ## 8. Superintendent & Engineer Roles

@@ -142,10 +142,5 @@ export function landBranch(cwd, base, branch, { force = false } = {}) {
   if (mergeCommit.code === 0) return { merged: true, fastForwarded: false, note: "merged with commit" };
 
   return { merged: false, note: `merge failed: ${merge.stderr || mergeCommit.stderr}` };
-}
 
-export function runTest(cwd, testCommand) {
-  if (!testCommand) return { code: 0, stdout: "(no test_command configured)", stderr: "" };
-  const res = run("sh", ["-c", testCommand], { cwd });
-  return { code: res.code, stdout: res.stdout.trim(), stderr: res.stderr.trim() };
 }

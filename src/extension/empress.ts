@@ -22,10 +22,10 @@ import {
   createWorktree,
   removeWorktree,
   listBranches,
-  runTest,
   landBranch,
   isGitRepo,
 } from "../domain/git.js";
+import { runProjectCi } from "../domain/ci.js";
 import { evaluateRisk } from "../domain/risk.js";
 import { checkReadiness } from "../domain/readiness.js";
 import { getLessons, addLesson } from "../domain/lessons.js";
@@ -124,9 +124,9 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute() {
       const c = cfg();
-      const { project, agent, risk, readiness, jev } = c;
+      const { project, agent, risk, readiness, jev, ci } = c;
       return {
-        content: [{ type: "text", text: JSON.stringify({ project, agent, risk, readiness, jev, file: c.file }) }],
+        content: [{ type: "text", text: JSON.stringify({ project, agent, risk, readiness, jev, ci, file: c.file }) }],
       };
     },
   });
@@ -276,9 +276,9 @@ export default function (pi: ExtensionAPI) {
       const wt = path.join(cwd, ".empress", "worktrees", String(params.id));
       const testCommand = config.project?.test_command;
       if (!testCommand) return { content: [{ type: "text", text: JSON.stringify({ passing: true, note: "no test_command configured" }) }] };
-      const res = runTest(fs.existsSync(wt) ? wt : cwd, testCommand);
+      const res = runProjectCi(fs.existsSync(wt) ? wt : cwd, config);
       return {
-        content: [{ type: "text", text: JSON.stringify({ passing: res.code === 0, command: testCommand, stdout: res.stdout.slice(0, 4000), stderr: res.stderr.slice(0, 2000) }) }],
+        content: [{ type: "text", text: JSON.stringify({ passing: res.code === 0, engine: res.engine, command: testCommand, stdout: res.stdout.slice(0, 4000), stderr: res.stderr.slice(0, 2000) }) }],
       };
     },
   });
@@ -320,9 +320,9 @@ export default function (pi: ExtensionAPI) {
       const testCommand = config.project?.test_command;
       if (testCommand) {
         const wt = path.join(cwd, ".empress", "worktrees", String(params.id));
-        const check = runTest(fs.existsSync(wt) ? wt : cwd, testCommand);
+        const check = runProjectCi(fs.existsSync(wt) ? wt : cwd, config);
         if (check.code !== 0) {
-          return { content: [{ type: "text", text: JSON.stringify({ merged: false, reason: `test_command failed: ${check.stderr.slice(0, 1000) || check.stdout.slice(0, 1000)}` }) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ merged: false, reason: `test_command failed (${check.engine}): ${check.stderr.slice(0, 1000) || check.stdout.slice(0, 1000)}` }) }] };
         }
       }
 

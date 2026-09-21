@@ -68,6 +68,17 @@ empress init              # writes .empress/empress.toml + role prompts; asks ba
   a merge; leave empty to skip,
 - **max engineers** / **loop interval** / **language**.
 
+> **Containerized CI (optional).** Add a `[ci]` section to run the test command
+> inside an isolated container instead of on the host:
+> ```
+> [ci]
+> engine = "podman"     # host (default) | podman | docker
+> image  = "node:22-alpine"
+> network = "default"    # default | none | host
+> ```
+> The worktree is mounted read-write at `/project` and the test command runs in
+> the container. If the engine is unavailable it falls back to the host.
+
 > **After init**, the harness is just a config + role prompts. `agents/*` are
 > per-project instructions like CLAUDE.md — edit them freely.
 

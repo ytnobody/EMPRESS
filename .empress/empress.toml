@@ -36,3 +36,8 @@ min_body_length = 40
 
 [run]
 failure_notify_threshold = 3
+
+[ci]
+engine = "podman"
+image = "node:22-alpine"
+network = "default"

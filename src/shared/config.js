@@ -37,6 +37,11 @@ export const DEFAULTS = {
   jev: {
     model: "jev-latest",
   },
+  ci: {
+    engine: "host",
+    image: "",
+    network: "default",
+  },
   notification: {
     webhook_url: "",
     type: "",
