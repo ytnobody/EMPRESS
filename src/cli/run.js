@@ -16,7 +16,7 @@ import { loadConfig } from "../shared/config.js";
 import { readLoopState, patchLoopState } from "./state.js";
 import { tasksHash } from "../domain/wake.js";
 import { listTasks } from "../domain/tasks.js";
-import { checkReadyTasks } from "../domain/readiness.js";
+import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../domain/readiness.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(__dirname, "..", "extension", "empress.ts");
@@ -136,6 +136,15 @@ export async function runLoop(cwd, { model, thinking, once = false } = {}) {
       } else {
         // preflight: ONE Jev batch call; spawn LLM only if something is ready
         const checks = await checkReadyTasks(cwd, config, actionable);
+        // Visible degradation: count consecutive Jev-failure preflights and log them
+        // via last_skip_reason (deterministic-only readiness still lets the loop run).
+        const jevDegraded = checks.some((c) => c.reasons.includes(JEV_DEGRADED_REASON));
+        const prior = readLoopState(cwd);
+        if (jevDegraded || prior.consecutive_jev_failures) {
+          const patch = { consecutive_jev_failures: nextJevFailures(jevDegraded, prior.consecutive_jev_failures) };
+          if (jevDegraded) patch.last_skip_reason = JEV_DEGRADED_REASON;
+          patchLoopState(cwd, patch);
+        }
         const readyIds = checks.filter((c) => c.ready).map((c) => c.task.id);
         if (readyIds.length === 0) {
           console.log(`\n[wake ${new Date().toISOString()}] ${actionable.length} actionable, 0 ready (${checks.filter((c) => !c.ready).length} not-ready) — skip (zero LLM)`);
