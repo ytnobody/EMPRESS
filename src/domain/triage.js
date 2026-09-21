@@ -32,6 +32,13 @@ export const DANGEROUS_PATTERNS = [
   { name: "sql-concat", re: /(["'`]|\)\s*\+)\s*(SELECT|INSERT|UPDATE|DELETE)\s/i },
   { name: "deserialization", re: /\b(deserialize|unserialize|pickle\.loads|JSON\.parse)\s*\(\s*[^"'"`]*request|req|body|input/i },
   { name: "cors-wildcard", re: /Access-Control-Allow-Origin\s*[:=]\s*\*/i },
+  // injection: SSRF to internal/private hosts (incl. cloud metadata 169.254.169.254)
+  { name: "ssrf-internal-host", re: /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.169\.254|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|\[::1\])/i },
+  // injection: XXE — DOCTYPE with internal subset / SYSTEM / PUBLIC, or ENTITY decl
+  { name: "xxe", re: /<!(?:ENTITY\s|DOCTYPE[^>]*(?:\[|SYSTEM|PUBLIC))/i },
+  // injection: shell command built from interpolated input via `sh -c ...${...}`
+  // ponytail: regex heuristic (no taint tracking), upgrade to semantic/taint analysis if FP/FN matter
+  { name: "sh-c-injection", re: /\b(?:sh|bash|zsh)\s+-c\b[^\n]*\$\{/ },
 ];
 
 /**

@@ -18,6 +18,36 @@ test("scanDiff: clean diff -> no findings", () => {
   assert.deepEqual(scanDiff("+export function f(a){ return a + 1; }"), { secrets: [], dangerous: [] });
 });
 
+// Verifies: SSRF to cloud metadata / internal hosts is flagged as dangerous.
+test("scanDiff: flags SSRF to internal/http hosts", () => {
+  const bad = scanDiff('+const res = await fetch("http://169.254.169.254/latest/meta-data");\n+axios.get("http://localhost:3000/admin");\n+fetch("http://192.168.1.10/api");\n');
+  assert.ok(bad.dangerous.includes("ssrf-internal-host"));
+});
+
+// Verifies: an HTTP request to a clearly public host is NOT an SSRF signal.
+test("scanDiff: public https url -> no SSRF flag", () => {
+  const ok = scanDiff('+fetch("https://exampl.e.com/api/data");\n');
+  assert.ok(!ok.dangerous.includes("ssrf-internal-host"));
+});
+
+// Verifies: an XML DOCTYPE/ENTITY declaration (XXE vector) is flagged.
+test("scanDiff: flags XXE DOCTYPE/ENTITY", () => {
+  const bad = scanDiff('+const xml = "<!DOCTYPE foo [ <!ENTITY xxe SYSTEM \"file:///etc/passwd\"> ]><foo>&xxe;</foo>";\n');
+  assert.ok(bad.dangerous.includes("xxe"));
+});
+
+// Verifies: sh -c with an interpolated ${...} payload (unfiltered shell input) is flagged.
+test("scanDiff: flags sh -c with interpolated input", () => {
+  const bad = scanDiff('+execSync(`sh -c ${userInput}`);\n+bash -c \"cp -r $dir /tmp\"\n');
+  assert.ok(bad.dangerous.includes("sh-c-injection"));
+});
+
+// Verifies: sh -c with a fixed literal payload is not an injection signal.
+test("scanDiff: sh -c literal -> no injection flag", () => {
+  const ok = scanDiff('+execSync("sh -c \"echo done\"");\n');
+  assert.ok(!ok.dangerous.includes("sh-c-injection"));
+});
+
 // Verifies: code-without-tests is a PFT §9 convention signal; with tests it isn't.
 test("conventionSignals: code-only change flags PFT suspicion", () => {
   assert.deepEqual(conventionSignals(["src/cli/state.js"]), { testsChanged: false, codeWithoutTests: true });
