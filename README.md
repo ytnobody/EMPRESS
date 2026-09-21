@@ -11,63 +11,104 @@ removals and one addition:
 - **No Claude Code.** The Superintendent/Engineer loop is driven by pi
   (non-interactive `pi -p`), from a small Node driver or a `/empress` prompt.
 - **Jev.** Gate judgments (readiness, risk, lessons) are delegated to TypeSafe's
-  [Jev](https://typesafe.ai) (System One) via the existing
-  [CHARIOT](../CHARIOT) CLI — with graceful fallback to rules if Jev is absent.
+  [Jev](https://typesafe.ai) via the existing [CHARIOT](../CHARIOT) CLI — with
+  graceful fallback to rules if Jev is absent.
 
 > **"pi is the star. EMPRESS is the toolbox for local + judgment operations."**
 
 See **[DESIGN.md](DESIGN.md)** for the full architecture and the
 HERMIT→EMPRESS mapping.
 
-## Quick Start
+---
+
+## 1. Prerequisites
+
+| Tool | Required | Notes |
+|---|---|---|
+| **Node.js ≥ 18** | ✅ | runs the `empress` CLI |
+| **pi** | ✅ | the harness brain (`pi -p`) |
+| **git** | ✅ | worktrees / branches / merges |
+| **chariot** (Jev CLI) | optional | build from `../CHARIOT`, put on PATH, set `TYPESAFE_API_KEY`. Without it EMPRESS runs on deterministic rules only. |
+
+> **chariot PATH gotcha:** make sure `chariot`'s directory is on PATH as an
+> **expanded** path. A literal `~/bin` in PATH silently fails for tools like
+> Node (`~/` is not expanded at exec time). `empress doctor` verifies this.
+
+## 2. Get the `empress` command runnable
+
+The CLI is a single self-contained Node script — `node bin/empress.js`. Make it
+callable as `empress` (pick **one**):
 
 ```sh
-# 1. Make the CLI runnable
-npm link                       # or: alias empress="node bin/empress.js"
+# A) Put the harness dir on PATH (recommended)
+export PATH="/path/to/EMPRESS/bin:$PATH"      # add to ~/.bashrc / ~/.profile
+alias empress="node /path/to/EMPRESS/bin/empress.js"
 
-# 2. Stand up the pi extension + /empress prompt in any EMPRESS project
-pi install .                   # install the bundled extension + prompt template
+# B) Or symlink into a dir already on PATH
+ln -s /path/to/EMPRESS/bin/empress.js ~/bin/empress
 
-# 3. In a SWE project, scaffold the harness
+# C) Or npm link (installs a global `empress` bin)
+cd /path/to/EMPRESS && npm link
+```
+
+Verify it's on PATH, then check your environment:
+
+```sh
+empress --version
+empress doctor        # all ✓ = ready; ✗ tells you what to fix
+```
+
+## 3. Set up in a project
+
+```sh
 cd your-project
-empress init                   # writes empress.toml, .empress/, role prompts
-
-# 4. Create a task
-empress task "Add a sign-in flow" --acceptance "tests pass" --purpose "..."
-empress list
-
-# 5. Run the autonomous loop (recommended)
-empress run                    # spawns pi Superintendents + Engineers on demand
-
-# …or run a single pass interactively
-#   (inside pi): /empress
+git init                  # REQUIRED — EMPRESS needs a git repo (+ an initial commit)
+empress init              # writes .empress/empress.toml + role prompts; asks base branch, test command
 ```
 
-Once running, EMPRESS automatically: picks up open tasks → judges readiness
-(Jev) → creates a git worktree → spawns a parallel pi Engineer per task → runs
-the project's test command → evaluates risk (heuristics + Jev) → lands safe
-branches into `base_branch` → records lessons. HIGH-risk changes are left for a
-human, with a review comment.
+`empress init` asks for:
+- **base branch** (`main`) — the branch work lands onto,
+- **test command** (e.g. `go test ./...` / `node test`) — the "CI" gate run before
+  a merge; leave empty to skip,
+- **max engineers** / **loop interval** / **language**.
 
-## Requirements
+> **After init**, the harness is just a config + role prompts. `agents/*` are
+> per-project instructions like CLAUDE.md — edit them freely.
 
-- **pi** (the harness itself).
-- **git** (local worktrees/branches/merges).
-- **Node.js ≥ 18** (driver CLI).
-- **chariot** (optional, for Jev): build from `../CHARIOT`, put on PATH, and set
-  `TYPESAFE_API_KEY`. Without it, EMPRESS runs on deterministic rules only.
+## 4. Create a task and run it
 
-## Commands
+```sh
+empress task "Add a sign-in flow" --acceptance "tests pass" --purpose "handle login"
+empress list                          # see open tasks
+empress run --once                    # run a single Superintendent pass (supervised)
+# or leave it running unattended:
+empress run                           # tick loop, spawns Engineers on demand
+```
+
+Inside pi, you can also run a pass by hand with `/empress` (needs the extension:
+`pi install /path/to/EMPRESS`).
+
+Once running, EMPRESS automatically: picks up open tasks → judges readiness (Jev)
+→ creates a git worktree → spawns a parallel pi Engineer per task → runs the
+project's test command → evaluates risk (heuristics + Jev) → lands safe branches
+into `base_branch` → records lessons. **HIGH-risk changes are left for a human**
+with a review comment, never auto-merged.
+
+> **No tasks?** With an empty queue, a pass is an **idle pass** — it verifies
+> tool resolution, sees 0 tasks, and ends. That's normal; it re-checks each tick.
+
+## 5. Operations
 
 ```
-empress init                       Scaffold config, .empress store, role prompts
 empress task "<title>" [flags]     Create a task
 empress list [--all]               List tasks
-empress run [--once] [--model M]   Start the Superintendent tick loop
-empress pause|resume|quit|status   Control autonomous operation
+empress run [--once] [--model M]   Superintendent tick loop / single pass
+empress pause | resume | quit | status   Control autonomous operation
 empress doctor                     Check prerequisites
 empress version                    Print version
 ```
+
+Long unattended runs: put `empress run` under systemd (user service) or tmux.
 
 ## How it works
 
@@ -80,53 +121,49 @@ empress run (Node driver, tick loop)
           └─ spawn Engineers (pi subagents) in each worktree
 ```
 
-- **Superintendent** coordinates only — it never edits code. All implementation
-  is delegated to Engineers (a hard prohibition modeled on HERMIT).
-- **Engineers** work in isolated worktrees, implement against the task's
-  Purpose / Scope / Acceptance Criteria / Non-Goals, run tests, commit.
-- **Development conventions:** Engineers follow two rules
-  (`.empress/agents/coding-guidelines.md` + `coding-guidelines-ponytail.md`):
-  **Pure Function Testing / Command Verification** — tests are verification
-  arithmetic (spec-derived, not implementation-tracing), tests come first, and
-  non-trivial work gets a design doc before tests; **Ponytail** — the laziest
-  solution that works (YAGNI, stdlib-first), shortcuts marked `ponytail:` with a
-  ceiling/upgrade path. The Superintendent verifies the mapping and runs a
-  simplicity pass (via `empress_ponytail_debt`) before landing a task.
-- **Judgments** (readiness, risk, lesson quality) hit Jev via `chariot`
-  (`noul` / `choice` / `score`), falling back to rules when Jev is unavailable.
+- **Superintendent** coordinates only — it never edits code; it verifies the
+  mapping (task → design doc → tests → implementation) and minimality.
+- **Engineers** work in isolated worktrees against the task's Purpose / Scope /
+  Acceptance Criteria / Non-Goals, run tests, commit.
+- **Judgments** (readiness, risk, lessons) hit Jev via `chariot`
+  (`noul`/`choice`/`score`), falling back to rules when Jev is unavailable.
+
+## Development conventions (baked in)
+
+Engineers follow two rules (`.empress/agents/coding-guidelines.md` +
+`coding-guidelines-ponytail.md`):
+
+- **Pure Function Testing / Command Verification** — tests are verification
+  arithmetic (spec-derived, not implementation-tracing), tests come first,
+  non-trivial work gets a design doc before tests.
+- **Ponytail** — the laziest solution that works (YAGNI, stdlib-first); deliberate
+  shortcuts carry a `ponytail:` comment harvested by `empress_ponytail_debt`.
 
 ## Project layout
 
 ```
 .empress/
-├── empress.toml                 # config (no secrets: TYPESAFE_API_KEY is env)
-├── superintendent-state.json    # loop status + cadence (CLI-owned)
-├── lessons.md                   # learned lessons (Jev-scored)
-├── agents/                      # per-project role prompts (superintendent.md,
-│                                #   engineer.md, task.md.tmpl)
-├── tasks/NNNN-title.md          # one task file per item
-└── worktrees/                   # git worktrees (git-ignored)
+├── empress.toml              # config — COMMIT these (share with the team)
+├── agents/                   # role prompts (superintendent.md, engineer.md, …)
+├── tasks/NNNN-title.md       # task queue — RUNTIME (git-ignored, created via `empress task`)
+├── superintendent-state.json # loop status/cadence — RUNTIME (git-ignored)
+├── lessons.md                # learned lessons — RUNTIME (git-ignored)
+├── ponytail-debt.md          # simplicity-debt ledger — RUNTIME (git-ignored)
+└── worktrees/                # git worktrees — RUNTIME (git-ignored)
 ```
+
+## Troubleshooting
+
+- **`empress doctor` shows ✗ for chariot** — it's not on PATH as an expanded dir,
+  or `TYPESAFE_API_KEY` unset. Both are optional (Jev falls back to rules).
+- **`empress run` prints "Idle pass"** — no open tasks; create one with
+  `empress task`.
+- **A refactor of the harness itself is always HIGH** — control-plane paths
+  (`high_paths` in `empress.toml`) are never auto-merged, by design. Approve and
+  land manually (`git merge --no-ff <branch>`).
 
 ## License
 
 MIT
-
-## Dogfooding (EMPRESS on itself)
-
-EMPRESS can manage its own repo. It has been `empress init`-ed and committed:
-
-- `.empress/empress.toml` — `test_command = "node scripts/selfcheck.js"`, and the
-  harness control plane (`src/extension/`, `src/cli/`, `src/shared/`, `bin/`,
-  `package.json`, `.empress/agents/`, `src/prompts/`, `scripts/`) is marked
-  `high_paths` so a change to the harness itself is always flagged HIGH and never
-  auto-lands without a human.
-- Loops and bots resolve the project root even when an Engineer runs inside a git
-  worktree, so task-store tools (`empress_task_comment`, `empress_close_task`,
-  etc.) always hit the main repo's `.empress/`.
-
-Add tasks for real refactors (e.g. `empress task "..." --acceptance "..."`), then
-run the loop: `empress run`. Because refactors may touch high-risk paths, expect
-them to be reviewed and left for a human rather than auto-merged.
 
 [pi]: https://pi.dev
