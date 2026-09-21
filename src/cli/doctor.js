@@ -24,12 +24,8 @@ export async function doctor(cwd) {
   const tasksDir = fs.existsSync(path.join(cwd, EMPRESS_DIR, "tasks"));
   checks.push([".empress/tasks present", tasksDir, tasksDir ? "" : "run `empress init`"]);
 
-  const chariotRes = run("chariot", [], { timeout: 2000 });
-  const chariotOk = chariotRes.code === 0 || chariotRes.code === 2; // usage print exits 2
-  checks.push(["chariot (Jev CLI) available", chariotOk, chariotOk ? "" : "chariot not on PATH. Install from ../CHARIOT. (Optional — falls back to rules.)"]);
-
   const jev = jevAvailable();
-  checks.push(["TYPESAFE_API_KEY set", jev.apiKey, jev.apiKey ? "" : "Jev judgments disabled (falls back to deterministic rules)"]);
+  checks.push(["TYPESAFE_API_KEY set (Jev)", jev.apiKey, jev.apiKey ? "" : "Jev judgments disabled (falls back to deterministic rules — optional)"]);
 
   const rolePrompts = fs.existsSync(path.join(cwd, EMPRESS_DIR, "agents", "superintendent.md")) && fs.existsSync(path.join(cwd, EMPRESS_DIR, "agents", "engineer.md"));
   checks.push(["role prompts present", rolePrompts, rolePrompts ? "" : "run `empress init`"]);
@@ -40,14 +36,14 @@ export async function doctor(cwd) {
   let allOk = true;
   let warnOnly = 0;
   for (const [name, pass, msg] of checks) {
-    const kind = name.startsWith("chariot") || name.startsWith("TYPESAFE") ? (pass ? "ok" : "warn") : pass ? "ok" : "fail";
+    const kind = name.startsWith("TYPESAFE") ? (pass ? "ok" : "warn") : pass ? "ok" : "fail";
     if (kind === "warn") warnOnly++;
     if (kind === "fail") allOk = false;
     const mark = kind === "ok" ? "✓" : kind === "warn" ? "⚠" : "✗";
     console.log(`${mark} ${name}${msg ? `\n    ${msg}` : ""}`);
   }
 
-  const env = ["GIT", ...(chariotOk ? [] : ["CHARIOT"]), jev.apiKey ? "JEV" : "", "PI"].filter(Boolean);
+  const env = ["GIT", jev.apiKey ? "JEV" : "", "PI"].filter(Boolean);
   console.log(`\nReady: ${env.join(", ")}`);
   if (!allOk) {
     console.log("Some checks failed. See notes above.");

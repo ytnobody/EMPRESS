@@ -49,13 +49,12 @@ export async function evaluateInstruction(config, { riskLevel, hadClarification,
   score = Math.max(0, score);
 
   const jev = config.jev || {};
-  if (jevAvailable(jev.command || "chariot").available && score < 70) {
+  if (jevAvailable().available && score < 70) {
     const j = await jevOne({
       type: "score",
       instructions: "Score how clearly this task was specified, 0 (very unclear) to 100 (crystal clear).",
       state: `A task was implemented but generated ${riskLevel} risk and required human judgment.`,
       options: ["unclear", "mostly clear", "clear"],
-      command: jev.command || "chariot",
       model: jev.model || "jev-latest",
     });
     // Jev only refines downward the "this needs a lesson" signal.

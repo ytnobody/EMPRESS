@@ -34,10 +34,9 @@ max_engineers = ${o.max_engineers}
 loop_interval = ${o.loop_interval}
 branch_prefix = "empress/task"
 
-# Jev (System One, via the chariot CLI) drives judgments.
-# Set TYPESAFE_API_KEY in your environment. If unset, EMPRESS falls back to rules.
+# Jev (System One) drives judgments natively via HTTPS (TYPESAFE_API_KEY).
+# If the key is unset, EMPRESS falls back to deterministic rules.
 [jev]
-command = "chariot"
 model = "jev-latest"
 
 [risk]

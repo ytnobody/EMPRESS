@@ -35,7 +35,6 @@ export const DEFAULTS = {
     skip_acceptance_criteria_check: false,
   },
   jev: {
-    command: "chariot",
     model: "jev-latest",
   },
   notification: {

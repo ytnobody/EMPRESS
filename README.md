@@ -11,8 +11,8 @@ removals and one addition:
 - **No Claude Code.** The Superintendent/Engineer loop is driven by pi
   (non-interactive `pi -p`), from a small Node driver or a `/empress` prompt.
 - **Jev.** Gate judgments (readiness, risk, lessons) are delegated to TypeSafe's
-  [Jev](https://typesafe.ai) via the existing [CHARIOT](../CHARIOT) CLI — with
-  graceful fallback to rules if Jev is absent.
+  [Jev](https://typesafe.ai) (System One) via a **native HTTPS call** — with
+  graceful fallback to rules if no `TYPESAFE_API_KEY` is set.
 
 > **"pi is the star. EMPRESS is the toolbox for local + judgment operations."**
 
@@ -28,11 +28,7 @@ HERMIT→EMPRESS mapping.
 | **Node.js ≥ 18** | ✅ | runs the `empress` CLI |
 | **pi** | ✅ | the harness brain (`pi -p`) |
 | **git** | ✅ | worktrees / branches / merges |
-| **chariot** (Jev CLI) | optional | build from `../CHARIOT`, put on PATH, set `TYPESAFE_API_KEY`. Without it EMPRESS runs on deterministic rules only. |
-
-> **chariot PATH gotcha:** make sure `chariot`'s directory is on PATH as an
-> **expanded** path. A literal `~/bin` in PATH silently fails for tools like
-> Node (`~/` is not expanded at exec time). `empress doctor` verifies this.
+| **TYPESAFE_API_KEY** | optional | enables Jev judgments (readiness/risk/lessons); unset = deterministic rules only |
 
 ## 2. Get the `empress` command runnable
 
@@ -125,8 +121,9 @@ empress run (Node driver, tick loop)
   mapping (task → design doc → tests → implementation) and minimality.
 - **Engineers** work in isolated worktrees against the task's Purpose / Scope /
   Acceptance Criteria / Non-Goals, run tests, commit.
-- **Judgments** (readiness, risk, lessons) hit Jev via `chariot`
-  (`noul`/`choice`/`score`), falling back to rules when Jev is unavailable.
+- **Judgments** (readiness, risk, lessons) hit Jev via a native HTTPS request
+  (`noul`/`choice`/`score`), falling back to rules when `TYPESAFE_API_KEY` is
+  unset.
 
 ## Development conventions (baked in)
 
@@ -154,8 +151,8 @@ Engineers follow two rules (`.empress/agents/coding-guidelines.md` +
 
 ## Troubleshooting
 
-- **`empress doctor` shows ✗ for chariot** — it's not on PATH as an expanded dir,
-  or `TYPESAFE_API_KEY` unset. Both are optional (Jev falls back to rules).
+- **`empress doctor` shows ⚠ for TYPESAFE_API_KEY** — unset. Jev judgments are
+  disabled and it falls back to deterministic rules (optional).
 - **`empress run` prints "Idle pass"** — no open tasks; create one with
   `empress task`.
 - **A refactor of the harness itself is always HIGH** — control-plane paths

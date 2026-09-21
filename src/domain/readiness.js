@@ -43,12 +43,11 @@ export async function checkReadiness(cwd, config, task) {
   const det = deterministicReadiness(task, ready);
   const result = { ready: det.ready, reasons: [...det.reasons], jev: null, needs_clarification: !det.ready };
 
-  if (det.ready && ready.use_jev && jevAvailable(ready.command || config.jev?.command || "chariot").available) {
+  if (det.ready && ready.use_jev && jevAvailable().available) {
     const j = await jevOne({
       type: "noul",
       instructions: "This task description is ready to be implemented by an autonomous engineer: it states a clear purpose, scope, and acceptance criteria.",
       state: task.body,
-      command: (config.jev && config.jev.command) || "chariot",
       model: (config.jev && config.jev.model) || "jev-latest",
     });
     if (j.ok && typeof j.value === "number") {

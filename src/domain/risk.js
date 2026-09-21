@@ -72,14 +72,13 @@ export async function evaluateRisk(cwd, config, task) {
   };
 
   const jev = config.risk || {};
-  if (jev.use_jev && jevAvailable(jev.command || config.jev?.command || "chariot").available) {
+  if (jev.use_jev && jevAvailable().available) {
     const state = `task: ${task.title}\n\n${diffPatch(cwd, base, branch)}`;
     const j = await jevOne({
       type: "choice",
       instructions: "Classify how risky this code change is to land. low means small, isolated, well-scoped; high means large or touching core/security/config.",
       state,
       options: ["low", "medium", "high"],
-      command: (config.jev && config.jev.command) || "chariot",
       model: (config.jev && config.jev.model) || "jev-latest",
     });
     if (j.ok && j.value) {

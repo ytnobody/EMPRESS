@@ -14,7 +14,6 @@ branch_prefix = "empress/task"
 # Jev (System One, via the chariot CLI) drives judgments.
 # Set TYPESAFE_API_KEY in your environment. If unset, EMPRESS falls back to rules.
 [jev]
-command = "chariot"
 model = "jev-latest"
 
 [risk]

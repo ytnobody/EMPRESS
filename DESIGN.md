@@ -29,7 +29,8 @@ Reasoning, orchestration, and context management are delegated to **pi**
 
 - a thin **domain toolbox** (local task store + git operations) exposed as a
   pi **extension** (custom tools),
-- a thin **judgment layer** that shells out to **Jev** via the `chariot` CLI,
+- a thin **judgment layer** that calls **Jev** natively over HTTPS (`fetch`),
+  with fallback to rules when no `TYPESAFE_API_KEY` is set,
 - a thin **driver** (`empress run`) that keeps the loop alive and spawns
   pi Engineers in parallel, and
 - **role prompts** (`superintendent.md`, `engineer.md`) that teach pi how to
@@ -91,7 +92,7 @@ in the role prompts, and in Jev — not in EMPRESS's own logic.
    └───────────────────────────────┬────────────────────────┘
             domain layer (Node)     │
    ┌───────────────┬────────────────┴──────────────┬───────────────┐
-   │  git CLI      │  chariot CLI (Jev)            │  local files  │
+   │  git CLI      │  Jev HTTPS (fetch)            │  local files  │
    │  worktrees    │  <choice|score|noul>          │  .empress/    │
    │  branches/merge│  state per stdin line         │  tasks/       │
    │               │                               │  lessons.md   │
@@ -131,7 +132,7 @@ empress/
 │   │   ├── config.js          # empress.toml load / defaults
 │   │   └── shell.js           # runSync / runAsync helpers
 │   ├── domain/
-│   │   ├── jev.js             # chariot wrapper (Jev judgment primitives)
+│   │   ├── jev.js             # native Jev client (fetch; pure request/parse)
 │   │   ├── tasks.js           # local task store (.empress/tasks)
 │   │   ├── git.js             # worktree/branch/merge/diff helpers
 │   │   ├── risk.js            # deterministic + Jev risk evaluation
@@ -206,11 +207,12 @@ cycle.
 
 ---
 
-## 6. Jev / CHARIOT Integration
+## 6. Jev Integration (native)
 
-[Jev](https://typesafe.ai) (System One) is a single-pass judgment model. We
-surface it through the existing `chariot` CLI so EMPRESS gets three cheap
-judgment primitives without pulling in a big LLM:
+[Jev](https://typesafe.ai) (System One) is a single-pass judgment model. EMPRESS
+calls it **natively over HTTPS** (`fetch`, Node ≥18) — `src/domain/jev.js`
+builds the request and maps the answer, so there is no separate CLI to install.
+It gives EMPRESS three cheap judgment primitives without pulling in a big LLM:
 
 | Primitive | Meaning | EMPRESS uses it for |
 |---|---|---|
@@ -218,16 +220,16 @@ judgment primitives without pulling in a big LLM:
 | `choice` | pick one option | risk band selection / triage categories |
 | `score` | ordinal level, low→high | risk severity, lesson quality |
 
-The `jev` domain module pipes one `state` line per judgment into `chariot
-<type> [...] <instructions>` (stdin→stdout NDJSON, streaming), exactly the
-shape chariot is built for. The `TYPESAFE_API_KEY` env var is read by chariot.
+`jev.js` is deliberately PFT-shaped: request construction (`buildSystemOneRequest`,
+`buildCriteria`) and answer mapping (`parseAnswer`) are pure functions, and the
+HTTP transport is injectable — so `test/jev.test.mjs` asserts the assembled
+request/response contract (Command Verification) without real network. The
+`TYPESAFE_API_KEY` env var is the only required credential.
 
-**Graceful degradation.** If `chariot` is missing on PATH or `TYPESAFE_API_KEY`
-is unset, every judgment-backed tool falls back to its deterministic/rules
-component so EMPRESS still functions without Jev. `harness.toml` can force Jev
-usage on or off. This keeps Jev an *enhancement* of the harness, not a hard
-dependency — matching the "make Jev usable from the harness" goal without making
-it a blocker.
+**Graceful degradation.** If `TYPESAFE_API_KEY` is unset, every judgment-backed
+tool falls back to its deterministic/rules component so EMPRESS still functions
+without Jev. `empress.toml` can force Jev usage on or off. This keeps Jev an
+*enhancement* of the harness, not a hard dependency.
 
 ---
 
@@ -322,7 +324,7 @@ empress run            # Superintendent loop; spawns pi Engineers on demand
 | Step | Content | Dependencies |
 |---|---|---|
 | 1 | `package.json`, tsconfig, shared/frontmatter, shell | none |
-| 2 | `domain/jev.js` | chariot CLI |
+| 2 | `domain/jev.js` | fetch (Node runtime; no external CLI) |
 | 3 | `domain/tasks.js` | shared |
 | 4 | `domain/git.js`, `risk.js`, `readiness.js`, `lessons.js` | tasks, jev |
 | 5 | `extension/empress.ts` | domain |

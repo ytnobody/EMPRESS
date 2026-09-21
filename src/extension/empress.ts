@@ -1,6 +1,6 @@
 // EMPRESS — pi extension. Registers empress_* custom tools (mirroring HERMIT's
 // GitHub MCP tools but localized: tasks live in .empress/tasks, merges happen on
-// local branches, and judgments go to Jev via the chariot CLI). No GitHub, no
+// local branches, and judgments go to Jev (System One) via a native fetch call). No GitHub, no
 // Claude Code.
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
