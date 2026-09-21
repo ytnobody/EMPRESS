@@ -105,7 +105,9 @@ export async function jevJudge({
         }
         const parsed = await res.json();
         const answer = parsed?.answers?.["q"] ?? null;
-        results.push({ line: i + 1, input: state, answer });
+        // map by input line, not completion order: parallel fetches may settle in
+        // any order, so assign at results[i] (input index) rather than push().
+        results[i] = { line: i + 1, input: state, answer };
       } catch (e) {
         failed = failed || `state ${i + 1}: ${e.message}`;
       }

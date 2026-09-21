@@ -111,6 +111,7 @@ test("jevOne: sends correct request and maps the answer", async () => {
 });
 
 // Verifies: per-state results keep line order across a batch.
+// Verifies: per-state results keep line order across a batch (completion order matches input here).
 test("jevJudge: batches states and keeps order", async () => {
   const fetchFn = fakeFetch((body) => ({ answers: { q: { noul: body.state === "a" ? 0.1 : 0.9 } } }));
   const r = await jevJudge({
@@ -121,6 +122,41 @@ test("jevJudge: batches states and keeps order", async () => {
     fetchFn,
   });
   assert.equal(r.ok, true);
+  assert.deepEqual(r.results.map((x) => [x.line, x.answer.noul]), [[1, 0.1], [2, 0.9]]);
+});
+
+// Verifies: when async completion finishes OUT of input order, results are still
+// keyed by input line (index), not by completion order. That is the regression
+// guard for the batch-ordering bug: mapping result[line-1] by index, independent
+// of which fetch resolves first.
+test("jevJudge: maps answers by input line even when fetches resolve out of order", async () => {
+  // b resolves instantly; a is delayed longer, so completion order is b then a
+  // while input order is a then b. Injected transport, no real network.
+  const calls = [];
+  const transportFetch = (url, init) => {
+    calls.push(init);
+    const state = JSON.parse(init.body).state;
+    // Let the network settle: make "b" (second input) resolve FIRST.
+    const delay = state === "a" ? 5 : 0;
+    return new Promise((resolve) =>
+      setTimeout(() =>
+        resolve({
+          ok: true,
+          status: 200,
+          async json() { return { answers: { q: { noul: state === "a" ? 0.1 : 0.9 } } }; },
+        }),
+        delay
+      )
+    );
+  };
+  const r = await jevJudge({
+    type: "noul",
+    instructions: "x",
+    states: ["a", "b"],
+    apiKey: "k",
+    fetchFn: transportFetch,
+  });
+  assert.equal(calls.length, 2);
   assert.deepEqual(r.results.map((x) => [x.line, x.answer.noul]), [[1, 0.1], [2, 0.9]]);
 });
 
