@@ -12,8 +12,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { loadConfig } from "../shared/config.ts";
-import { readLoopState, patchLoopState } from "./state.ts";
+import { loadConfig, type LoadedConfig } from "../shared/config.ts";
+import { readLoopState, patchLoopState, type LoopStatePatch } from "./state.ts";
 import { tasksHash } from "../domain/wake.ts";
 import { listTasks } from "../domain/tasks.ts";
 import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../domain/readiness.ts";
@@ -34,9 +34,23 @@ const AUDIT_MSG =
   "`node bin/empress.js task \"<title>\" --acceptance \"...\"` (dedupe by simple title match) and " +
   "report what you did. Do NOT spawn Engineers or land anything.";
 
-function runPass({ cwd, config, model, thinking, audit = false }) {
+interface RunPassOptions {
+  cwd: string;
+  config: LoadedConfig;
+  model?: string;
+  thinking?: string;
+  audit?: boolean;
+}
+
+interface RunPassResult {
+  code: number;
+  out: string;
+  err: string;
+}
+
+function runPass({ cwd, config, model, thinking, audit = false }: RunPassOptions): Promise<RunPassResult> {
   const agentPrompt = path.join(cwd, ".empress", "agents", "superintendent.md");
-  const args = ["--print", "--no-session", "-e", EXTENSION];
+  const args: string[] = ["--print", "--no-session", "-e", EXTENSION];
   if (model) args.push("--model", model);
   if (thinking) args.push("--thinking", thinking);
   if (config.project?.test_command) process.env.EMPRESS_TEST_COMMAND = config.project.test_command;
@@ -54,11 +68,11 @@ function runPass({ cwd, config, model, thinking, audit = false }) {
   });
 }
 
-function sleepFor(ms) {
+function sleepFor(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function handleResult(cwd, res, started, pass, config) {
+async function handleResult(cwd: string, res: RunPassResult, started: string, pass: number, config: LoadedConfig) {
   const stateNow = readLoopState(cwd);
   if (res.code === 0) {
     patchLoopState(cwd, { last_pass_at: started, last_success_tick: started, consecutive_failures: 0, pass_count: pass });
@@ -74,7 +88,10 @@ async function handleResult(cwd, res, started, pass, config) {
   }
 }
 
-export async function runLoop(cwd, { model, thinking, once = false } = {}) {
+export async function runLoop(
+  cwd: string,
+  { model, thinking, once = false }: { model?: string; thinking?: string; once?: boolean } = {}
+) {
   const config = loadConfig(cwd);
   if (!config.file) {
     console.error("empress: no empress.toml found (run `empress init` first).");
@@ -87,7 +104,7 @@ export async function runLoop(cwd, { model, thinking, once = false } = {}) {
   const auditEnabled = auditMs > 0;
   console.log(`empress run: project=${cwd} wake=${wakeMs / 1000}s audit=${auditEnabled ? auditMs / 1000 + "s" : "off"}`);
 
-  let prevHash = null;
+  let prevHash: string | null = null;
   let lastAuditAt = Date.now();
   let pass = 0;
 
@@ -141,7 +158,7 @@ export async function runLoop(cwd, { model, thinking, once = false } = {}) {
         const jevDegraded = checks.some((c) => c.reasons.includes(JEV_DEGRADED_REASON));
         const prior = readLoopState(cwd);
         if (jevDegraded || prior.consecutive_jev_failures) {
-          const patch = { consecutive_jev_failures: nextJevFailures(jevDegraded, prior.consecutive_jev_failures) };
+          const patch: LoopStatePatch = { consecutive_jev_failures: nextJevFailures(jevDegraded, prior.consecutive_jev_failures) };
           if (jevDegraded) patch.last_skip_reason = JEV_DEGRADED_REASON;
           patchLoopState(cwd, patch);
         }

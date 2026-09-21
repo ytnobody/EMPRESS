@@ -11,8 +11,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENTS_SRC = path.resolve(__dirname, "..", "agents");
 const PROMPTS_SRC = path.resolve(__dirname, "..", "prompts");
 
-function prompt(question, def) {
-  return new Promise((resolve) => {
+/** CLI-accepted init options. Deliberately tolerant: flags from parseFlags are string|boolean. */
+export interface InitOpts {
+  base_branch?: string | boolean;
+  test_command?: string | boolean;
+  max_engineers?: string | number | boolean;
+  loop_interval?: string | number | boolean;
+  language?: string | boolean;
+  toml?: string;
+  noConfigFile?: boolean | string;
+}
+
+function prompt(question: string, def: string): Promise<string> {
+  return new Promise<string>((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     rl.question(`${question}${def ? ` [${def}]` : ""}: `, (ans) => {
       rl.close();
@@ -21,7 +32,7 @@ function prompt(question, def) {
   });
 }
 
-const DEFAULT_TOML = (o) => `# EMPRESS project config. Shared with the team.
+const DEFAULT_TOML = (o: InitOpts) => `# EMPRESS project config. Shared with the team.
 # No GitHub, no Claude Code. Everything runs on local git + local task files.
 
 [project]
@@ -68,7 +79,7 @@ min_body_length = 40
 failure_notify_threshold = 3
 `;
 
-function copyAgents(root) {
+function copyAgents(root: string) {
   const dest = path.join(root, EMPRESS_DIR, "agents");
   fs.mkdirSync(dest, { recursive: true });
   for (const f of fs.readdirSync(AGENTS_SRC)) {
@@ -79,7 +90,7 @@ function copyAgents(root) {
   return dest;
 }
 
-function wirePrompts(root) {
+function wirePrompts(root: string) {
   // Project-scoped /empress prompt template pointing at the per-project role prompt.
   const dir = path.join(root, ".pi", "prompts");
   fs.mkdirSync(dir, { recursive: true });
@@ -96,7 +107,7 @@ function wirePrompts(root) {
   }
 }
 
-export async function initProject(cwd, opts = {}) {
+export async function initProject(cwd: string, opts: InitOpts = {}) {
   const dest = cwd;
   fs.mkdirSync(path.join(dest, EMPRESS_DIR, "tasks"), { recursive: true });
   fs.mkdirSync(path.join(dest, EMPRESS_DIR, "worktrees"), { recursive: true });
@@ -132,6 +143,7 @@ export async function initProject(cwd, opts = {}) {
     task_comments_since: null,
     last_pass_at: null,
     consecutive_failures: 0,
+    consecutive_jev_failures: 0,
     last_success_tick: null,
   });
 
