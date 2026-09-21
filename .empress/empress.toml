@@ -1,0 +1,39 @@
+# EMPRESS project config. Shared with the team.
+# No GitHub, no Claude Code. Everything runs on local git + local task files.
+
+[project]
+base_branch = "main"
+test_command = "node scripts/selfcheck.js"
+language = "en"
+
+[agent]
+max_engineers = 2
+loop_interval = 120
+branch_prefix = "empress/task"
+
+# Jev (System One, via the chariot CLI) drives judgments.
+# Set TYPESAFE_API_KEY in your environment. If unset, EMPRESS falls back to rules.
+[jev]
+command = "chariot"
+model = "jev-latest"
+
+[risk]
+use_jev = true
+high_file_threshold = 20
+high_line_threshold = 500
+medium_file_threshold = 10
+medium_line_threshold = 200
+# Self-hosting: refactoring the harness control plane is always HIGH.
+high_paths = ["src/extension/", "src/cli/", "src/shared/", "bin/", "package.json", "empress.toml", ".empress/agents/", "src/prompts/", "scripts/"]
+medium_paths = ["src/domain/", "src/agents/"]
+
+[readiness]
+use_jev = true
+min_body_length = 40
+
+# [notification]
+# webhook_url = "https://hooks.example.com/..."
+# type = "generic"   # slack | discord | generic (auto-detected from URL if omitted)
+
+[run]
+failure_notify_threshold = 3

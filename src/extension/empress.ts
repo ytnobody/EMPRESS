@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { loadConfig } from "../shared/config.js";
+import { loadConfig, resolveProjectRoot } from "../shared/config.js";
 import {
   listTasks,
   getTask,
@@ -33,8 +33,9 @@ import { getLessons, addLesson } from "../domain/lessons.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function projectDir() {
-  // The Superintendent runs with cwd = project root.
-  return process.cwd();
+  // Resolve the project root (walking up from, e.g., a git worktree) so task-store
+  // tools always hit the main repo's .empress. Superintendent runs at the root.
+  return resolveProjectRoot();
 }
 
 // ---- Engineer spawner -------------------------------------------------------
@@ -436,7 +437,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute() {
       const { readLoopState } = await import("../cli/state.js");
-      return { content: [{ type: "text", text: JSON.stringify(readLoopState(process.cwd())) }] };
+      return { content: [{ type: "text", text: JSON.stringify(readLoopState(projectDir())) }] };
     },
   });
 
@@ -447,7 +448,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ patch: Type.Object({}, { additionalProperties: true }) }),
     async execute(_id, params) {
       const { patchLoopState } = await import("../cli/state.js");
-      const state = patchLoopState(process.cwd(), params.patch || {});
+      const state = patchLoopState(projectDir(), params.patch || {});
       return { content: [{ type: "text", text: JSON.stringify(state) }] };
     },
   });

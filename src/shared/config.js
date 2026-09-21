@@ -86,20 +86,45 @@ export function mergeConfig(base, over) {
 }
 
 /**
- * Load config for a project. Looks up `.empress/empress.toml` then `empress.toml`
- * in the given (or current) directory. Returns full merged config with defaults.
+ * Resolve the EMPRESS project root by walking up from `start` looking for
+ * `.empress/empress.toml` or `empress.toml`. This lets tools called from inside
+ * a git worktree (`.empress/worktrees/N`) find the main repo's task store + config
+ * instead of a worktree-local one.
+ */
+export function resolveProjectRoot(start = process.cwd()) {
+  let dir = path.resolve(start);
+  while (true) {
+    if (fs.existsSync(path.join(dir, EMPRESS_DIR, CONFIG_FILENAME))) {
+      return dir; // dir/.empress/empress.toml — this is the project root
+    }
+    // Bare empress.toml is also a root marker, but never the .empress data dir
+    // itself (it would self-match its own empress.toml and stop one level early).
+    if (path.basename(dir) !== EMPRESS_DIR && fs.existsSync(path.join(dir, CONFIG_FILENAME))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return start;
+    dir = parent;
+  }
+}
+
+/**
+ * Load config for a project. Resolves the project root (walking up to the
+ * nearest `.empress/empress.toml` / `empress.toml`) so worktree-invoked tools
+ * share the main config. Returns full merged config with defaults.
  */
 export function loadConfig(cwd = process.cwd()) {
+  const root = resolveProjectRoot(cwd);
   let file = "";
   for (const candidate of [
-    path.join(cwd, EMPRESS_DIR, CONFIG_FILENAME),
-    path.join(cwd, CONFIG_FILENAME),
+    path.join(root, EMPRESS_DIR, CONFIG_FILENAME),
+    path.join(root, CONFIG_FILENAME),
   ]) {
     if (fs.existsSync(candidate)) {
       file = candidate;
       break;
     }
   }
-  if (!file) return { ...structuredClone(DEFAULTS), file: null, cwd };
-  return { ...mergeConfig(structuredClone(DEFAULTS), loadTomlFile(file)), file, cwd };
+  if (!file) return { ...structuredClone(DEFAULTS), file: null, cwd: root };
+  return { ...mergeConfig(structuredClone(DEFAULTS), loadTomlFile(file)), file, cwd: root };
 }

@@ -1,0 +1,35 @@
+---
+id: ${id}
+title: "${title}"
+status: open
+assignee: ""
+created: "${created}"
+needs_clarification: false
+branch: ""
+comments: []
+---
+# ${title}
+
+## Purpose
+_What we are building and why. (Level 0 business intent is fine here.)_
+
+## Scope
+_What is / is not included._
+
+## Acceptance Criteria
+_Criteria must be spec-level and independently verifiable (see `.empress/agents/coding-guidelines.md` §7/§9): an engineer should be able to derive test expectations from these alone, without running code. Avoid phrasing that merely restates an implementation._
+- [ ] _concrete, testable, spec-level condition_
+- [ ] _concrete, testable, spec-level condition_
+
+## Non-Goals
+- _explicitly out of scope_
+
+---
+> **Engineer note:** follow the two project conventions — Pure Function Testing /
+> Command Verification (`read .empress/agents/coding-guidelines.md`) for *what you
+> verify*, and Ponytail (`read .empress/agents/coding-guidelines-ponytail.md`) for
+> *what you build* (laziest solution that works, YAGNI ladder, stdlib-first;
+> mark deliberate shortcuts `ponytail:` with a ceiling + upgrade path). For
+> non-trivial work, write a minimal design doc (behavior + Command/interface spec)
+> first, then tests, then implementation. If a requirement is ambiguous, mark it
+> `[ASSUMPTION]` and add it to your handoff list instead of silently deciding (§10).

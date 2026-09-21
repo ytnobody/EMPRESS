@@ -112,4 +112,21 @@ empress run (Node driver, tick loop)
 
 MIT
 
+## Dogfooding (EMPRESS on itself)
+
+EMPRESS can manage its own repo. It has been `empress init`-ed and committed:
+
+- `.empress/empress.toml` — `test_command = "node scripts/selfcheck.js"`, and the
+  harness control plane (`src/extension/`, `src/cli/`, `src/shared/`, `bin/`,
+  `package.json`, `.empress/agents/`, `src/prompts/`, `scripts/`) is marked
+  `high_paths` so a change to the harness itself is always flagged HIGH and never
+  auto-lands without a human.
+- Loops and bots resolve the project root even when an Engineer runs inside a git
+  worktree, so task-store tools (`empress_task_comment`, `empress_close_task`,
+  etc.) always hit the main repo's `.empress/`.
+
+Add tasks for real refactors (e.g. `empress task "..." --acceptance "..."`), then
+run the loop: `empress run`. Because refactors may touch high-risk paths, expect
+them to be reviewed and left for a human rather than auto-merged.
+
 [pi]: https://pi.dev
