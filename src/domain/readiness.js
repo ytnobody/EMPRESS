@@ -68,11 +68,15 @@ export async function checkReadiness(cwd, config, task) {
  * Batch readiness: deterministic checks for ALL tasks, then ONE Jev batch call
  * for the deterministic-ready remainder. Used by the run driver's wake preflight
  * (LLM not spawned unless at least one task is ready). Jev count = 1 call for
- * the whole batch. `_jevJudge` is injectable for tests.
+ * the whole batch. `_jevJudge` and `_jevAvailable` are injectable so tests are
+ * independent of the ambient TYPESAFE_API_KEY (a missing key silently degrades
+ * to deterministic-only — which the container CI caught as a test bug).
  * @returns {Promise<Array<{task:object, ready:boolean, reasons:string[], jev:object|null}>>}
  */
-export async function checkReadyTasks(cwd, config, tasks, { _jevJudge } = {}) {
+export async function checkReadyTasks(cwd, config, tasks, { _jevJudge, _jevAvailable } = {}) {
   const ready = config.readiness || {};
+  const isJev = (typeof _jevAvailable === "function" ? _jevAvailable() : jevAvailable()).available;
+  const useJev = ready.use_jev && isJev;
   const results = [];
   const needJev = [];
 
@@ -82,7 +86,7 @@ export async function checkReadyTasks(cwd, config, tasks, { _jevJudge } = {}) {
       results.push({ task: t, ready: false, reasons: det.reasons, jev: null });
       continue;
     }
-    if (!(ready.use_jev && jevAvailable().available)) {
+    if (!useJev) {
       results.push({ task: t, ready: true, reasons: det.reasons, jev: null });
       continue;
     }

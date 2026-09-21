@@ -68,7 +68,7 @@ test("checkReadyTasks: one batch Jev call for the ready-needed group", async () 
     return { ok: true, results: opts.states.map((s) => ({ answer: { noul: 0.9 } })) };
   };
   const config = { readiness: { use_jev: true, jev_threshold: 0.6 }, jev: { model: "jev-latest" } };
-  const res = await checkReadyTasks(dir, config, tasks, { _jevJudge: fakeJudge });
+  const res = await checkReadyTasks(dir, config, tasks, { _jevJudge: fakeJudge, _jevAvailable: () => ({ available: true }) });
   assert.equal(calls.length, 1); // ONE call total
   assert.equal(calls[0].type, "noul");
   assert.equal(calls[0].states.length, 3); // all three in one batch
@@ -81,7 +81,7 @@ test("checkReadyTasks: Jev below threshold marks not-ready", async () => {
   const task = { id: 7, title: "t", body: keepBody(7, "t") };
   const fakeJudge = async (opts) => ({ ok: true, results: opts.states.map((s, i) => ({ answer: { noul: i === 0 ? 0.3 : 0.9 } })) });
   const config = { readiness: { use_jev: true, jev_threshold: 0.6 }, jev: {} };
-  const res = await checkReadyTasks(dir, config, [task], { _jevJudge: fakeJudge });
+  const res = await checkReadyTasks(dir, config, [task], { _jevJudge: fakeJudge, _jevAvailable: () => ({ available: true }) });
   assert.equal(res[0].ready, false);
   assert.match(res[0].reasons.join(" "), /Jev 0\.30 < 0\.6/);
 });
