@@ -6,10 +6,10 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { loadConfig, resolveProjectRoot } from "../shared/config.ts";
+import { loadConfig, resolveProjectRoot, type LoadedConfig } from "../shared/config.ts";
 import {
   listTasks,
   getTask,
@@ -17,6 +17,7 @@ import {
   addComment,
   closeTask,
   taskBrief,
+  type Task,
 } from "../domain/tasks.ts";
 import {
   createWorktree,
@@ -34,6 +35,11 @@ import { getLessons, addLesson } from "../domain/lessons.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Build a tool result (text content only, empty details) satisfying AgentToolResult.
+function reply(text: string): AgentToolResult<unknown> {
+  return { content: [{ type: "text", text }], details: undefined };
+}
+
 function projectDir() {
   // Resolve the project root (walking up from, e.g., a git worktree) so task-store
   // tools always hit the main repo's .empress. Superintendent runs at the root.
@@ -42,7 +48,9 @@ function projectDir() {
 
 // ---- Engineer spawner -------------------------------------------------------
 
-function spawnEngineer(projectCwd, task, worktreePath, { model, maxConcurrent }) {
+type SpawnResult = { task: number; code: number; report: string; err: string };
+
+function spawnEngineer(projectCwd: string, task: Task, worktreePath: string | undefined, { model, maxConcurrent }: { model?: string; maxConcurrent: number }) {
   const engineerPrompt = path.join(projectCwd, ".empress", "agents", "engineer.md");
   const ext = path.resolve(__dirname, "empress.ts");
   const args = [
@@ -55,7 +63,7 @@ function spawnEngineer(projectCwd, task, worktreePath, { model, maxConcurrent })
   if (fs.existsSync(engineerPrompt)) args.push("--append-system-prompt", engineerPrompt);
   args.push(`Implement the following task for EMPRESS. Work inside the provided worktree, run the project test command, commit to the branch, and report back (task id, branch, what you did, test result).\n\n${taskBrief(task)}`);
 
-  return new Promise((resolve) => {
+  return new Promise<SpawnResult>((resolve) => {
     const proc = spawn("pi", args, { cwd: worktreePath, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let err = "";
@@ -66,8 +74,8 @@ function spawnEngineer(projectCwd, task, worktreePath, { model, maxConcurrent })
   });
 }
 
-async function mapLimit(items, limit, fn) {
-  const results = new Array(items.length);
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
   let next = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) || 1 }, async () => {
     while (true) {
@@ -82,7 +90,7 @@ async function mapLimit(items, limit, fn) {
 
 // ---- Notification -----------------------------------------------------------
 
-async function notify(config, event, message) {
+async function notify(config: LoadedConfig, event: string, message: string) {
   const url = config.notification?.webhook_url;
   if (!url) return { sent: false, event };
   const text = message || event;
@@ -94,11 +102,11 @@ async function notify(config, event, message) {
   try {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     return { sent: res.ok, event, status: res.status };
-  } catch (e) {
-    return { sent: false, event, error: String(e && e.message || e) };
+  } catch (e: unknown) {
+    return { sent: false, event, error: String((e && (e as { message?: unknown }).message) || e) };
   }
 }
-function detectType(url) {
+function detectType(url: string) {
   if (/discord/.test(url)) return "discord";
   if (/hooks\.slack/.test(url)) return "slack";
   return "generic";
@@ -115,7 +123,7 @@ export default function (pi: ExtensionAPI) {
     description: "Return the current wall-clock time (RFC3339). Authoritative for cadence tracking.",
     parameters: Type.Object({}),
     async execute() {
-      return { content: [{ type: "text", text: JSON.stringify(new Date().toISOString()) }] };
+      return reply(JSON.stringify(new Date().toISOString()));
     },
   });
 
@@ -127,9 +135,7 @@ export default function (pi: ExtensionAPI) {
     async execute() {
       const c = cfg();
       const { project, agent, risk, readiness, jev, ci } = c;
-      return {
-        content: [{ type: "text", text: JSON.stringify({ project, agent, risk, readiness, jev, ci, file: c.file }) }],
-      };
+      return reply(JSON.stringify({ project, agent, risk, readiness, jev, ci, file: c.file }));
     },
   });
 
@@ -143,12 +149,10 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params) {
       const cwd = projectDir();
       const tasks = listTasks(cwd, { includeAll: Boolean(params?.include_all) });
-      return {
-        content: [{ type: "text", text: JSON.stringify(tasks.map((t) => ({
-          Number: t.id, Title: t.title, Status: t.status, assignee: t.assignee,
-          labels: t.labels, needs_clarification: t.needs_clarification, branch: t.branch, body: t.body,
-        }))) }],
-      };
+      return reply(JSON.stringify(tasks.map((t) => ({
+        Number: t.id, Title: t.title, Status: t.status, assignee: t.assignee,
+        labels: t.labels, needs_clarification: t.needs_clarification, branch: t.branch, body: t.body,
+      }))));
     },
   });
 
@@ -159,7 +163,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ id: Type.Number() }),
     async execute(_id, params) {
       const t = getTask(projectDir(), params.id);
-      return { content: [{ type: "text", text: t ? taskBrief(t) : `task #${params.id} not found` }] };
+      return reply(t ? taskBrief(t) : `task #${params.id} not found`);
     },
   });
 
@@ -172,7 +176,7 @@ export default function (pi: ExtensionAPI) {
       const cwd = projectDir();
       const config = cfg();
       const t = getTask(cwd, params.id);
-      if (!t) return { content: [{ type: "text", text: `task #${params.id} not found` }] };
+      if (!t) return reply(`task #${params.id} not found`);
       const verdict = await checkReadiness(cwd, config, t);
       if (verdict.needs_clarification) {
         if (!t.needs_clarification) {
@@ -189,9 +193,9 @@ export default function (pi: ExtensionAPI) {
           updateTask(cwd, params.id, { needs_clarification: true, status: "blocked" });
           t.needs_clarification = true;
         }
-        return { content: [{ type: "text", text: JSON.stringify({ ready: false, reasons: verdict.reasons, jev: verdict.jev }) }] };
+        return reply(JSON.stringify({ ready: false, reasons: verdict.reasons, jev: verdict.jev }));
       }
-      return { content: [{ type: "text", text: JSON.stringify({ ready: true, reasons: verdict.reasons, jev: verdict.jev }) }] };
+      return reply(JSON.stringify({ ready: true, reasons: verdict.reasons, jev: verdict.jev }));
     },
   });
 
@@ -205,7 +209,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params) {
       const t = updateTask(projectDir(), params.id, { status: "assigned", assignee: params.assignee || "superintendent" });
-      return { content: [{ type: "text", text: t ? JSON.stringify({ success: true, task: t.id, status: t.status }) : "not found" }] };
+      return reply(t ? JSON.stringify({ success: true, task: t.id, status: t.status }) : "not found");
     },
   });
 
@@ -218,20 +222,18 @@ export default function (pi: ExtensionAPI) {
       const cwd = projectDir();
       const config = cfg();
       const t = getTask(cwd, params.id);
-      if (!t) return { content: [{ type: "text", text: `task #${params.id} not found` }] };
+      if (!t) return reply(`task #${params.id} not found`);
       try {
-        if (!isGitRepo(cwd)) return { content: [{ type: "text", text: "not a git repository" }] };
+        if (!isGitRepo(cwd)) return reply("not a git repository");
         const { branch, worktreePath, existed } = createWorktree(cwd, {
           taskId: params.id,
           branchPrefix: config.agent?.branch_prefix,
           baseBranch: config.project?.base_branch,
         });
-        const withBranch = updateTask(cwd, params.id, { branch, status: t.status === "open" ? "assigned" : t.status });
-        return {
-          content: [{ type: "text", text: JSON.stringify({ worktree_path: worktreePath, branch, existed, task: withBranch.id }) }],
-        };
-      } catch (e) {
-        return { content: [{ type: "text", text: `create_worktree failed: ${e.message}` }], isError: true };
+        updateTask(cwd, params.id, { branch, status: t.status === "open" ? "assigned" : t.status });
+        return reply(JSON.stringify({ worktree_path: worktreePath, branch, existed, task: params.id }));
+      } catch (e: unknown) {
+        return { content: [{ type: "text", text: `create_worktree failed: ${(e as { message?: unknown }).message}` }], isError: true, details: undefined };
       }
     },
   });
@@ -249,19 +251,17 @@ export default function (pi: ExtensionAPI) {
       const config = cfg();
       const cap = Number(config.agent?.max_engineers ?? 4);
       const ids = (params.ids || []).slice(0, cap);
-      const tasks = ids.map((id) => getTask(cwd, id)).filter(Boolean);
-      if (!tasks.length) return { content: [{ type: "text", text: "no valid tasks to spawn" }] };
+      const tasks = ids.map((id) => getTask(cwd, id)).filter((t): t is Task => t !== null);
+      if (!tasks.length) return reply("no valid tasks to spawn");
 
-      onUpdate?.({ content: [{ type: "text", text: `Spawning ${tasks.length} Engineer(s)...` }] });
+      onUpdate?.(reply(`Spawning ${tasks.length} Engineer(s)...`));
       const results = await mapLimit(tasks, cap, (t, i) => {
         const wt = path.join(cwd, ".empress", "worktrees", String(t.id));
         const worktreePath = fs.existsSync(wt) ? wt : undefined;
         return spawnEngineer(cwd, t, worktreePath, { model: params.model, maxConcurrent: cap });
       });
       const summary = results.map((r) => `#${r.task}: exit=${r.code} ${r.code === 0 ? "ok" : "FAILED"}`).join("\n");
-      return {
-        content: [{ type: "text", text: `${summary}\n\n${results.map((r) => `#${r.task}\n${r.err ? "stderr: " + r.err + "\n" : ""}${r.report}`).join("\n\n")}` }],
-      };
+      return reply(`${summary}\n\n${results.map((r) => `#${r.task}\n${r.err ? "stderr: " + r.err + "\n" : ""}${r.report}`).join("\n\n")}`);
     },
   });
 
@@ -274,14 +274,12 @@ export default function (pi: ExtensionAPI) {
       const cwd = projectDir();
       const config = cfg();
       const t = getTask(cwd, params.id);
-      if (!t) return { content: [{ type: "text", text: "task not found" }] };
+      if (!t) return reply("task not found");
       const wt = path.join(cwd, ".empress", "worktrees", String(params.id));
       const testCommand = config.project?.test_command;
-      if (!testCommand) return { content: [{ type: "text", text: JSON.stringify({ passing: true, note: "no test_command configured" }) }] };
+      if (!testCommand) return reply(JSON.stringify({ passing: true, note: "no test_command configured" }));
       const res = runProjectCi(fs.existsSync(wt) ? wt : cwd, config);
-      return {
-        content: [{ type: "text", text: JSON.stringify({ passing: res.code === 0, engine: res.engine, command: testCommand, stdout: res.stdout.slice(0, 4000), stderr: res.stderr.slice(0, 2000) }) }],
-      };
+      return reply(JSON.stringify({ passing: res.code === 0, engine: res.engine, command: testCommand, stdout: res.stdout.slice(0, 4000), stderr: res.stderr.slice(0, 2000) }));
     },
   });
 
@@ -294,9 +292,9 @@ export default function (pi: ExtensionAPI) {
       const cwd = projectDir();
       const config = cfg();
       const t = getTask(cwd, params.id);
-      if (!t) return { content: [{ type: "text", text: "task not found" }] };
+      if (!t) return reply("task not found");
       const risk = await evaluateRisk(cwd, config, t);
-      return { content: [{ type: "text", text: JSON.stringify(risk) }] };
+      return reply(JSON.stringify(risk));
     },
   });
 
@@ -312,11 +310,11 @@ export default function (pi: ExtensionAPI) {
       const cwd = projectDir();
       const config = cfg();
       const t = getTask(cwd, params.id);
-      if (!t || !t.branch) return { content: [{ type: "text", text: "task has no branch (create_worktree first)" }] };
+      if (!t || !t.branch) return reply("task has no branch (create_worktree first)");
       const risk = config.risk || {};
 
       if (risk.require_human_approval && !params.force) {
-        return { content: [{ type: "text", text: JSON.stringify({ merged: false, reason: "require_human_approval (warm-up mode) — pass force=true" }) }] };
+        return reply(JSON.stringify({ merged: false, reason: "require_human_approval (warm-up mode) — pass force=true" }));
       }
 
       const testCommand = config.project?.test_command;
@@ -324,14 +322,14 @@ export default function (pi: ExtensionAPI) {
         const wt = path.join(cwd, ".empress", "worktrees", String(params.id));
         const check = runProjectCi(fs.existsSync(wt) ? wt : cwd, config);
         if (check.code !== 0) {
-          return { content: [{ type: "text", text: JSON.stringify({ merged: false, reason: `test_command failed (${check.engine}): ${check.stderr.slice(0, 1000) || check.stdout.slice(0, 1000)}` }) }] };
+          return reply(JSON.stringify({ merged: false, reason: `test_command failed (${check.engine}): ${check.stderr.slice(0, 1000) || check.stdout.slice(0, 1000)}` }));
         }
       }
 
       const riskEval = await evaluateRisk(cwd, config, t);
       if (riskEval.level === "HIGH" && !params.force) {
         addComment(cwd, params.id, "empress", `⚠️ HIGH risk — skipping auto-land. Reasons: ${riskEval.reasons.join("; ")}`);
-        return { content: [{ type: "text", text: JSON.stringify({ merged: false, reason: "HIGH risk", reasons: riskEval.reasons }) }] };
+        return reply(JSON.stringify({ merged: false, reason: "HIGH risk", reasons: riskEval.reasons }));
       }
 
       const base = config.project?.base_branch;
@@ -341,7 +339,7 @@ export default function (pi: ExtensionAPI) {
         removeWorktree(cwd, params.id, t.branch);
         addLesson(cwd, `After landing task #${params.id}, the result was ${riskEval.level} risk — ${riskEval.reasons.join("; ") || "no concerns"}.`);
       }
-      return { content: [{ type: "text", text: JSON.stringify({ ...res, branch: t.branch }) }] };
+      return reply(JSON.stringify({ ...res, branch: t.branch }));
     },
   });
 
@@ -351,7 +349,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ id: Type.Number(), body: Type.String(), author: Type.Optional(Type.String({ default: "superintendent" })) }),
     async execute(_id, params) {
       const c = addComment(projectDir(), params.id, params.author || "superintendent", params.body);
-      return { content: [{ type: "text", text: c ? JSON.stringify({ success: true }) : "not found" }] };
+      return reply(c ? JSON.stringify({ success: true }) : "not found");
     },
   });
 
@@ -362,7 +360,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ id: Type.Number(), note: Type.Optional(Type.String()) }),
     async execute(_id, params) {
       const t = closeTask(projectDir(), params.id, params.note || "");
-      return { content: [{ type: "text", text: t ? JSON.stringify({ success: true, status: t.status }) : "not found" }] };
+      return reply(t ? JSON.stringify({ success: true, status: t.status }) : "not found");
     },
   });
 
@@ -377,7 +375,7 @@ export default function (pi: ExtensionAPI) {
       const dir = params?.cwd ? path.resolve(projectDir(), params.cwd) : projectDir();
       const r = runVulnCheck(dir);
       const lines = r.ok ? [r.summary ?? "", ...r.findings.map((f) => `[${f.severity}]${f.isDirect ? " (direct)" : ""} ${f.name} ${f.range}${f.fixAvailable ? " [fix available]" : ""}`)].slice(0, 50) : [r.error];
-      return { content: [{ type: "text", text: lines.join("\n") }] };
+      return reply(lines.join("\n"));
     },
   });
 
@@ -390,10 +388,9 @@ export default function (pi: ExtensionAPI) {
       const cwd = projectDir();
       const config = cfg();
       const t = getTask(cwd, params.id);
-      if (!t) return { content: [{ type: "text", text: "task not found" }] };
+      if (!t) return reply("task not found");
       const r = await runTriage(cwd, config, t);
-      return { content: [{ type: "text", text: JSON.stringify({ signal: r.signal, reasons: r.reasons, degraded: r.degraded, 
-        deterministic: r.deterministic, convention: r.conv, jevNoul: r.jevNoul }) }] };
+      return reply(JSON.stringify({ signal: r.signal, reasons: r.reasons, degraded: r.degraded, deterministic: r.deterministic, convention: r.conv, jevNoul: r.jevNoul }));
     },
   });
 
@@ -425,7 +422,7 @@ export default function (pi: ExtensionAPI) {
       const text = rows.length
         ? `${rows.map((r) => r.line).join("\n")}\n\n${rows.length} markers, ${noTrigger} with no trigger.`
         : "No ponytail: debt. Clean ledger.";
-      return { content: [{ type: "text", text }] };
+      return reply(text);
     },
   });
 
@@ -437,7 +434,7 @@ export default function (pi: ExtensionAPI) {
     async execute() {
       const config = cfg();
       const branches = listBranches(projectDir(), config.agent?.branch_prefix);
-      return { content: [{ type: "text", text: JSON.stringify(branches) }] };
+      return reply(JSON.stringify(branches));
     },
   });
 
@@ -448,7 +445,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute() {
       const lessons = getLessons(projectDir());
-      return { content: [{ type: "text", text: JSON.stringify(lessons) }] };
+      return reply(JSON.stringify(lessons));
     },
   });
 
@@ -459,7 +456,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ text: Type.String() }),
     async execute(_id, params) {
       const ok = addLesson(projectDir(), params.text);
-      return { content: [{ type: "text", text: JSON.stringify({ added: ok }) }] };
+      return reply(JSON.stringify({ added: ok }));
     },
   });
 
@@ -470,7 +467,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute() {
       const { readLoopState } = await import("../cli/state.js");
-      return { content: [{ type: "text", text: JSON.stringify(readLoopState(projectDir())) }] };
+      return reply(JSON.stringify(readLoopState(projectDir())));
     },
   });
 
@@ -482,7 +479,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params) {
       const { patchLoopState } = await import("../cli/state.js");
       const state = patchLoopState(projectDir(), params.patch || {});
-      return { content: [{ type: "text", text: JSON.stringify(state) }] };
+      return reply(JSON.stringify(state));
     },
   });
 
@@ -492,7 +489,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ event: Type.String(), message: Type.Optional(Type.String()) }),
     async execute(_id, params) {
       const result = await notify(cfg(), params.event, params.message || "");
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      return reply(JSON.stringify(result));
     },
   });
 }
