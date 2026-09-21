@@ -124,14 +124,19 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
 When the driver spawns you with the idle-audit instruction (no ready work):
 
 1. Confirm tool resolution with `empress_now`.
-2. Run the project test command in the repo via bash (e.g. `node scripts/selfcheck.js`).
+2. Run the project test command in the repo via bash (e.g. `bun scripts/selfcheck.ts`).
 3. Run `empress_vuln_check` for dependency CVEs.
 4. Run `empress_ponytail_debt` — flag `no-trigger` markers (rot risk).
-5. Quick dangerous-pattern scan per `coding-guidelines-security.md` (eval/exec/
-   secrets/… grep across src).
-6. For each REAL finding, file a task via bash: `node bin/empress.js task
+5. Run `empress_audit_scan` — deterministic findings across **three axes**:
+   **modern** (TODO/FIXME/HACK rot, oversized files, stale `.js` residue),
+   **secure** (tracked secret-ish files such as `.env*`/credentials, plus a
+   quick secrets/dangerous-pattern grep per `coding-guidelines-security.md`),
+   **light** (large files).
+6. For each REAL finding, file a task via bash: `bun bin/empress.ts task
    "<title>" --acceptance "..."` after checking `empress_list_tasks` for a
-   simple title-match dedupe. Do not invent work; report `clean` when nothing.
+   simple title-match dedupe. Prefer LOW/MEDIUM-scoped tasks (auto-landable by
+   the loop) and keep control-plane (HIGH) items separated so each stays
+   reviewable. Do not invent work; report `clean` when nothing.
 7. Report concisely. Never spawn Engineers or land anything during an audit pass.
 
 ## Notes

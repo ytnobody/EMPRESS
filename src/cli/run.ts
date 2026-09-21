@@ -29,10 +29,13 @@ const SUPER_MSG =
 
 const AUDIT_MSG =
   "You are the EMPRESS Superintendent running an IDLE AUDIT pass (no ready work — this pass is scheduled by the run driver's audit_interval). " +
-  "Follow .empress/agents/superintendent.md's Idle audit pass: run the project test command, `empress_vuln_check`, " +
-  "`empress_ponytail_debt`, and a quick dangerous-pattern scan; file REAL findings as tasks via bash " +
-  "`node bin/empress.js task \"<title>\" --acceptance \"...\"` (dedupe by simple title match) and " +
-  "report what you did. Do NOT spawn Engineers or land anything.";
+  "Follow .empress/agents/superintendent.md's Idle audit pass. Aim to make the repo " +
+  "MORE MODERN (rotate rot: TODO/FIXME/HACK, stale patterns), MORE SECURE (CVEs, " +
+  "secrets, dangerous patterns, tracked secret-ish files), and LIGHTER/FASTER (large " +
+  "files, dead weight) — `empress_audit_scan` gives deterministic findings per axis. " +
+  "File REAL findings as tasks via bash `bun bin/empress.ts task \"<title>\" --acceptance \"...\"` " +
+  "(dedupe by simple title match; prefer auto-landable LOW/MEDIUM tasks, separate control-plane HIGH ones) " +
+  "and report what you did. Do NOT spawn Engineers or land anything during an audit pass.";
 
 interface RunPassOptions {
   cwd: string;

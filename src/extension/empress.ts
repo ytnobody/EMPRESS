@@ -29,6 +29,7 @@ import {
 import { runProjectCi } from "../domain/ci.ts";
 import { runVulnCheck } from "../domain/vuln.ts";
 import { runTriage } from "../domain/triage.ts";
+import { collectAuditFindings } from "../domain/audit.ts";
 import { evaluateRisk } from "../domain/risk.ts";
 import { checkReadiness } from "../domain/readiness.ts";
 import { getLessons, addLesson } from "../domain/lessons.ts";
@@ -391,6 +392,18 @@ export default function (pi: ExtensionAPI) {
       if (!t) return reply("task not found");
       const r = await runTriage(cwd, config, t);
       return reply(JSON.stringify({ signal: r.signal, reasons: r.reasons, degraded: r.degraded, deterministic: r.deterministic, convention: r.conv, jevNoul: r.jevNoul }));
+    },
+  });
+
+  pi.registerTool({
+    name: "empress_audit_scan",
+    label: "Empress Audit Scan",
+    description: "Deterministic idle-audit scans across three axes: modern (TODO/FIXME/HACK rot, oversized files, legacy .js residue), secure (tracked secret-ish files like .env/credentials), light (large files). Returns per-axis findings + summary. The Superintendent audit pass files REAL findings as tasks (dedupe); the loop then implements+lands them when idle.",
+    parameters: Type.Object({}),
+    async execute(_id, params) {
+      const r = collectAuditFindings(projectDir());
+      const lines = [r.summary, "", ...r.findings.map((f) => `[${f.axis}] ${f.title} — ${f.detail}`)];
+      return { content: [{ type: "text", text: lines.join("\n") }], details: { axisCounts: r.summary } };
     },
   });
 

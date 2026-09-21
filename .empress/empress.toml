@@ -45,4 +45,4 @@ network = "default"
 [run]
 failure_notify_threshold = 3
 wake_interval = 60
-audit_interval = 3600
+audit_interval = 1800
