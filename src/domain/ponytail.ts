@@ -9,8 +9,17 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", ".cac
 const MARKER = /(?:#|\/\/)\s?ponytail:\s*(.*)$/i;
 const TRIGGER_WORDS = ["if ", "when ", "until ", "once ", "if/", "upgrade", "revisit", "later", "@"];
 
-function walk(dir, out, relBase) {
-  let entries;
+export interface PonytailRow {
+  file: string;
+  line: number;
+  ceiling: string;
+  upgrade: string;
+  noTrigger: boolean;
+  raw: string;
+}
+
+function walk(dir: string, out: PonytailRow[], relBase: string): void {
+  let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
@@ -51,12 +60,12 @@ function walk(dir, out, relBase) {
 }
 
 /** Collect ponytail markers. Returns { rows, markers, noTrigger }. */
-export function collectPonytailDebt(cwd) {
-  const rows = [];
+export function collectPonytailDebt(cwd: string): { rows: PonytailRow[]; lines: string[]; markers: number; noTrigger: number } {
+  const rows: PonytailRow[] = [];
   walk(cwd, rows, ".");
   rows.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
   const grouped = groupBy(rows, (r) => r.file);
-  const lines = [];
+  const lines: string[] = [];
   for (const [file, fileRows] of grouped) {
     lines.push(`## ${file}`);
     for (const r of fileRows) lines.push(r.raw);
@@ -64,12 +73,12 @@ export function collectPonytailDebt(cwd) {
   return { rows, lines, markers: rows.length, noTrigger: rows.filter((r) => r.noTrigger).length };
 }
 
-function groupBy(arr, fn) {
-  const m = new Map();
+function groupBy<T>(arr: T[], fn: (x: T) => string): Map<string, T[]> {
+  const m = new Map<string, T[]>();
   for (const x of arr) {
     const k = fn(x);
     if (!m.has(k)) m.set(k, []);
-    m.get(k).push(x);
+    m.get(k)!.push(x);
   }
   return m;
 }

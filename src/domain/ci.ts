@@ -12,19 +12,21 @@
 // never touch a real container.
 
 import { run } from "../shared/shell.ts";
+import type { RunOpts, RunResult } from "../shared/shell.ts";
 
 export const CI_ENGINES = ["host", "podman", "docker"];
 
-/**
- * Pure: build the container-engine args for running the gate in a container.
- * @param {object} o
- * @param {"podman"|"docker"} o.engine
- * @param {string} [o.image]
- * @param {string} [o.network]  "default" | "none" | "host"
- * @param {string} o.projectPath  host dir mounted into the container
- * @returns {{bin:string, args:string[]}}
- */
-export function buildContainerArgs({ engine, image, network = "default", projectPath }) {
+type ContainerEngine = "podman" | "docker";
+type CiRunner = (cmd: string, args: string[], opts?: RunOpts) => RunResult;
+
+/** Pure: the container-engine args for running the gate in a container. */
+export function buildContainerArgs(o: {
+  engine: ContainerEngine;
+  image?: string;
+  network?: string;
+  projectPath: string;
+}): { bin: string; args: string[] } {
+  const { engine, image, network = "default", projectPath } = o;
   const bin = engine === "docker" ? "docker" : "podman";
   const args = ["run", "--rm"];
   if (network === "none") args.push("--network", "none");
@@ -38,15 +40,18 @@ export function buildContainerArgs({ engine, image, network = "default", project
 /**
  * Run the CI gate. Dispatches by engine; falls back to host when a configured
  * container engine is unavailable. Never throws (returns {code, stdout, stderr}).
- * @param {string} cwd
- * @param {object} opts
- * @param {string} opts.testCommand
- * @param {string} [opts.engine]           host|podman|docker
- * @param {string} [opts.image]
- * @param {string} [opts.network]
- * @param {(cmd:string,args:string[],o:object)=>object} [opts._run]  injectable runner
  */
-export function runCi(cwd, { testCommand, engine = "host", image, network = "default", _run = run }) {
+export function runCi(
+  cwd: string,
+  opts: {
+    testCommand?: string;
+    engine?: string;
+    image?: string;
+    network?: string;
+    _run?: CiRunner;
+  }
+): { code: number; stdout: string; stderr: string; engine: string } {
+  const { testCommand, engine = "host", image, network = "default", _run = run } = opts;
   if (!testCommand) return { code: 0, stdout: "(no test_command configured)", stderr: "", engine: "host" };
 
   if ((engine === "podman" || engine === "docker") && image) {
@@ -67,7 +72,12 @@ export function runCi(cwd, { testCommand, engine = "host", image, network = "def
  * Convenience: run the project's CI gate from config. Reads test_command from
  * `[project]` and `[ci]` engine/image/network from config.
  */
-export function runProjectCi(cwd, config, { _run, engine, image, network } = {}) {
+export function runProjectCi(
+  cwd: string,
+  config: { project?: { test_command?: string }; ci?: { engine?: string; image?: string; network?: string } },
+  o: { _run?: CiRunner; engine?: string; image?: string; network?: string } = {}
+): { code: number; stdout: string; stderr: string; engine: string } {
+  const { _run, engine, image, network } = o;
   return runCi(cwd, {
     testCommand: config.project?.test_command,
     engine: engine ?? config.ci?.engine ?? "host",

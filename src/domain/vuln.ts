@@ -9,11 +9,32 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { run } from "../shared/shell.ts";
+import type { RunOpts, RunResult } from "../shared/shell.ts";
 
-const SEVERITY_RANK = { critical: 4, high: 3, moderate: 2, low: 1 };
+const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, moderate: 2, low: 1 };
+
+export type Stack = "go" | "npm" | "pip";
+
+type CiRunner = (cmd: string, args: string[], opts?: RunOpts) => RunResult;
+
+/**
+ * Unified finding shape: npm findings carry name/isDirect/range/fixAvailable/url;
+ * govulncheck & pip text/json findings carry title/at. Fields a stack does not
+ * produce are simply absent (optional).
+ */
+export interface Finding {
+  severity: string;
+  name?: string;
+  isDirect?: boolean;
+  range?: string;
+  fixAvailable?: boolean;
+  url?: string;
+  title?: string;
+  at?: string;
+}
 
 /** Pure: detect which stack a project uses from its root dir. */
-export function detectStack(root) {
+export function detectStack(root: string): Stack | null {
   if (fs.existsSync(path.join(root, "go.mod"))) return "go";
   if (fs.existsSync(path.join(root, "package.json")) &&
       ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"].some((l) => fs.existsSync(path.join(root, l)))) {
@@ -26,7 +47,7 @@ export function detectStack(root) {
 }
 
 /** Pure: the scanner command for a stack (Command verification target). */
-export function buildVulnCommand(stack) {
+export function buildVulnCommand(stack: Stack | null): { bin: string; args: string[] } | null {
   switch (stack) {
     case "go":
       return { bin: "govulncheck", args: ["-format", "text", "./..."] };
@@ -39,16 +60,25 @@ export function buildVulnCommand(stack) {
   }
 }
 
+interface NpmVuln {
+  name?: string;
+  severity?: string;
+  isDirect?: boolean;
+  range?: string;
+  fixAvailable?: boolean | { name?: string };
+  url?: string;
+}
+
 /** Pure: parse `npm audit --json` output into findings. */
-export function parseNpmAudit(text) {
-  let data;
+export function parseNpmAudit(text: string): Finding[] {
+  let data: { vulnerabilities?: Record<string, NpmVuln> };
   try {
     data = JSON.parse(text);
   } catch {
     return [];
   }
-  const vulns = data?.vulnerabilities || {};
-  const findings = [];
+  const vulns: Record<string, NpmVuln> = data?.vulnerabilities || {};
+  const findings: Finding[] = [];
   for (const [name, v] of Object.entries(vulns)) {
     if (!v) continue;
     findings.push({
@@ -56,7 +86,7 @@ export function parseNpmAudit(text) {
       severity: v.severity || "unknown",
       isDirect: Boolean(v.isDirect),
       range: v.range || "",
-      fixAvailable: v.fixAvailable === true || (v.fixAvailable && typeof v.fixAvailable === "object"),
+      fixAvailable: Boolean(v.fixAvailable === true || (v.fixAvailable && typeof v.fixAvailable === "object")),
       url: typeof v.url === "string" ? v.url : "",
     });
   }
@@ -65,9 +95,9 @@ export function parseNpmAudit(text) {
 }
 
 /** Pure: parse govulncheck text output into a compact summary (best-effort). */
-export function parseGovulncheckText(text) {
+export function parseGovulncheckText(text: string): Finding[] {
   // govulncheck -format text prints "Vulnerability #1: ..." blocks.
-  const findings = [];
+  const findings: Finding[] = [];
   const blocks = String(text || "").split(/\nVulnerability #\d+: /).slice(1);
   for (const b of blocks) {
     const lines = b.split("\n");
@@ -79,30 +109,41 @@ export function parseGovulncheckText(text) {
   return findings;
 }
 
+export interface VulnResult {
+  ok: boolean;
+  stack?: string;
+  findings: Finding[];
+  summary?: string;
+  error?: string;
+  raw?: string;
+}
+
 /**
  * Run the vulnerability scan for a project.
  * @returns {Promise<{ok:boolean, stack?:string, findings?:object[], summary?:string, error?:string}>}
  */
-export function runVulnCheck(cwd, { stack, _run = run } = {}) {
+export function runVulnCheck(cwd: string, opts: { stack?: Stack; _run?: CiRunner } = {}): VulnResult {
+  const { stack, _run = run } = opts;
   const detected = stack ?? detectStack(cwd);
-  if (!detected) return { ok: false, error: "no supported dependency stack detected (go.mod / package.json+lock / requirements.txt)" };
+  if (!detected) return { ok: false, findings: [], error: "no supported dependency stack detected (go.mod / package.json+lock / requirements.txt)" };
 
   const cmd = buildVulnCommand(detected);
+  if (!cmd) return { ok: false, stack: detected, findings: [], error: `unsupported stack: ${detected}` };
   // probe availability
   const probe = _run(cmd.bin, ["--version"], { cwd });
   if (probe.code !== 0 && cmd.bin !== "npm") {
     return {
       ok: false,
       stack: detected,
+      findings: [],
       error: `\`${cmd.bin}\` not available (e.g. go install golang.org/x/vuln/cmd/govulncheck@latest).`,
     };
   }
 
   const res = _run(cmd.bin, cmd.args, { cwd });
-  let findings = [];
+  let findings: Finding[] = [];
   if (detected === "npm") findings = parseNpmAudit(res.stdout);
-  else if (detected === "go") findings = parseGovulncheckText(res.stdout);
-  else findings = parseGovulncheckText(res.stdout); // pip-audit json: keep generic
+  else findings = parseGovulncheckText(res.stdout); // go text + pip-audit: keep generic
 
   return {
     ok: true,
