@@ -12,6 +12,10 @@ import { loadConfig } from "../src/shared/config.ts";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let failures = 0;
 
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 const cfg = loadConfig(root);
 if (!cfg.file) {
   console.error("selfcheck: no empress.toml — run `empress init` first.");
@@ -27,7 +31,7 @@ try {
   execFileSync(process.execPath, ["typecheck"], { stdio: "inherit" });
   console.log("typecheck: PASS");
 } catch (e) {
-  console.error(`typecheck FAIL: ${e.message}`);
+  console.error(`typecheck FAIL: ${errMsg(e)}`);
   failures++;
 }
 
@@ -35,7 +39,7 @@ try {
   execFileSync(process.execPath, ["test", path.join(root, "test")], { stdio: "inherit" });
   console.log("unit tests: PASS");
 } catch (e) {
-  console.error(`unit tests FAIL: ${e.message}`);
+  console.error(`unit tests FAIL: ${errMsg(e)}`);
   failures++;
 }
 
