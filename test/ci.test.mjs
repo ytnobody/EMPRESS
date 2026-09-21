@@ -3,7 +3,10 @@
 // dispatches/falls back correctly using an injected runner — no real container.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildContainerArgs, runCi, runProjectCi } from "../src/domain/ci.js";
+import { buildContainerArgs, runCi, runProjectCi, nodeModulesExtraMount } from "../src/domain/ci.ts";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // Verifies: podman args are {run --rm, mount :rw, workdir /project, image}.
 test("buildContainerArgs: podman mounts project rw and sets /project workdir", () => {
@@ -77,4 +80,38 @@ test("runProjectCi: derives engine/image/network from config", () => {
   runProjectCi("/repo", config, { _run: (c, a) => { calls.push([c, a]); return c === "podman" && a[0] === "--version" ? { code: 0 } : { code: 0, stdout: "", stderr: "" }; } });
   assert.equal(calls[1][0], "podman");
   assert.deepEqual(calls[1][1], ["run", "--rm", "--network", "none", "-v", "/repo:/project:rw", "-w", "/project", "node:22-alpine", "sh", "-c", "node scripts/selfcheck.js"]);
+});
+// Verifies: nodeModulesExtraMount resolves a worktree node_modules symlink to a
+// /deps mount (NOT /project/node_modules — the OCI runtime fails openat2 when the
+// bind target is a host-absolute symlink).
+test("nodeModulesExtraMount: symlink -> /deps ro mount of the real dir", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ci-nm-"));
+  const real = path.join(base, "real");
+  fs.mkdirSync(real);
+  fs.mkdirSync(path.join(base, "worktree"), { recursive: true });
+  fs.symlinkSync(real, path.join(base, "worktree", "node_modules"), "dir");
+  const mounts = nodeModulesExtraMount(path.join(base, "worktree"));
+  assert.equal(mounts.length, 1);
+  assert.deepEqual(mounts[0], { host: real, container: "/deps", mode: "ro" });
+});
+
+// Verifies: no symlink -> no extra mount.
+test("nodeModulesExtraMount: missing/plain node_modules -> []", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ci-nm2-"));
+  assert.deepEqual(nodeModulesExtraMount(base), []);
+});
+
+// Verifies: runCi prefixes the container command with the relink when deps are mounted.
+test("runCi: deps mount prepends the /project/node_modules relink", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ci-pfx-"));
+  fs.mkdirSync(path.join(base, "real"));
+  fs.mkdirSync(path.join(base, "wt"), { recursive: true });
+  fs.symlinkSync(path.join(base, "real"), path.join(base, "wt", "node_modules"), "dir");
+  const calls = [];
+  const _run = (c, a) => { calls.push([c, a]); return c === "podman" && a[0] === "--version" ? { code: 0 } : { code: 0, stdout: "", stderr: "" }; };
+  runCi(path.join(base, "wt"), { testCommand: "bun scripts/selfcheck.ts", engine: "podman", image: "oven/bun:1.4-alpine", _run });
+  const shCall = calls.find(([c, a]) => c === "podman" && a[0] === "run");
+  const shIndex = shCall[1].lastIndexOf("sh");
+  assert.equal(shCall[1][shIndex + 1], "-c");
+  assert.equal(shCall[1][shIndex + 2], "rm -f /project/node_modules && ln -s /deps /project/node_modules && bun scripts/selfcheck.ts");
 });
