@@ -2,6 +2,7 @@
 // Detects the project stack and runs the appropriate scanner:
 //   go.mod          -> govulncheck
 //   package.json+lock -> npm audit --omit=dev --json
+//   package.json+bun.lock -> bun audit --json
 //   requirements.txt / pyproject.toml -> pip-audit
 // Design (PFT): stack detection and output parsing are pure functions
 // (verification arithmetic); only the scanner spawn is external (injectable `_run`).
@@ -13,7 +14,7 @@ import type { RunOpts, RunResult } from "../shared/shell.ts";
 
 const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, moderate: 2, low: 1 };
 
-export type Stack = "go" | "npm" | "pip";
+export type Stack = "go" | "npm" | "pip" | "bun";
 
 type CiRunner = (cmd: string, args: string[], opts?: RunOpts) => RunResult;
 
@@ -36,6 +37,10 @@ export interface Finding {
 /** Pure: detect which stack a project uses from its root dir. */
 export function detectStack(root: string): Stack | null {
   if (fs.existsSync(path.join(root, "go.mod"))) return "go";
+  // bun.lock signals a bun-managed project (checked first: bun wins over an npm lockfile if both exist).
+  if (fs.existsSync(path.join(root, "package.json")) && fs.existsSync(path.join(root, "bun.lock"))) {
+    return "bun";
+  }
   if (fs.existsSync(path.join(root, "package.json")) &&
       ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"].some((l) => fs.existsSync(path.join(root, l)))) {
     return "npm";
@@ -53,6 +58,10 @@ export function buildVulnCommand(stack: Stack | null): { bin: string; args: stri
       return { bin: "govulncheck", args: ["-format", "text", "./..."] };
     case "npm":
       return { bin: "npm", args: ["audit", "--omit=dev", "--json"] };
+    case "bun":
+      // ponytail: bun audit scans the full lockfile (no --omit=dev flag exists; JSON shape differs from npm's),
+      // upgrade: add --audit-level/--ignore-based filtering if dev-dep noise or severity gating matters.
+      return { bin: "bun", args: ["audit", "--json"] };
     case "pip":
       return { bin: "pip-audit", args: ["--format", "json", "--local"] };
     default:
@@ -89,6 +98,44 @@ export function parseNpmAudit(text: string): Finding[] {
       fixAvailable: Boolean(v.fixAvailable === true || (v.fixAvailable && typeof v.fixAvailable === "object")),
       url: typeof v.url === "string" ? v.url : "",
     });
+  }
+  findings.sort((a, b) => (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0));
+  return findings;
+}
+
+interface BunAdvisory {
+  id?: number;
+  url?: string;
+  title?: string;
+  severity?: string;
+  vulnerable_versions?: string;
+}
+
+/**
+ * Pure: parse `bun audit --json` output into findings.
+ * Shape (verified on bun 1.4.2): clean -> {}; vulnerable -> { "<pkg>": [advisory...] },
+ * where advisory = { id, url, title, severity, vulnerable_versions, cwe, cvss }.
+ */
+export function parseBunAudit(text: string): Finding[] {
+  let data: Record<string, BunAdvisory[]>;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!data || typeof data !== "object") return [];
+  const findings: Finding[] = [];
+  for (const [name, advisories] of Object.entries(data)) {
+    if (!Array.isArray(advisories)) continue;
+    for (const a of advisories) {
+      findings.push({
+        name,
+        severity: a?.severity || "unknown",
+        range: a?.vulnerable_versions || "",
+        url: typeof a?.url === "string" ? a.url : "",
+        title: typeof a?.title === "string" ? a.title : "",
+      });
+    }
   }
   findings.sort((a, b) => (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0));
   return findings;
@@ -143,6 +190,7 @@ export function runVulnCheck(cwd: string, opts: { stack?: Stack; _run?: CiRunner
   const res = _run(cmd.bin, cmd.args, { cwd });
   let findings: Finding[] = [];
   if (detected === "npm") findings = parseNpmAudit(res.stdout);
+  else if (detected === "bun") findings = parseBunAudit(res.stdout);
   else findings = parseGovulncheckText(res.stdout); // go text + pip-audit: keep generic
 
   return {
