@@ -1,7 +1,9 @@
-// .empress/superintendent-state.json read/write. Mirrors HERMIT's loop state.
+// .empress/superintendent-state.json read/write. Thin I/O shell over the pure
+// loop-state helpers in src/domain/loopstate.js (default object + patch merge).
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { EMPRESS_DIR } from "../shared/config.js";
+import { defaultLoopState, mergeLoopState } from "../domain/loopstate.js";
 
 function stateFile(cwd) {
   return path.join(cwd, EMPRESS_DIR, "superintendent-state.json");
@@ -10,11 +12,12 @@ function stateFile(cwd) {
 export function readLoopState(cwd) {
   const file = stateFile(cwd);
   if (!fs.existsSync(file)) {
-    return { status: "running", pr_comments_since: null, task_comments_since: null, last_pass_at: null, consecutive_failures: 0, last_success_tick: null };
+    return defaultLoopState();
   }
   try {
-    return { status: "running", ...JSON.parse(fs.readFileSync(file, "utf-8")) };
+    return mergeLoopState(defaultLoopState(), JSON.parse(fs.readFileSync(file, "utf-8")));
   } catch {
+    // Literal fallback, same as before: not a merge of the default object.
     return { status: "running", error: "state file unreadable" };
   }
 }
@@ -26,7 +29,7 @@ export function writeLoopState(cwd, state) {
 
 export function patchLoopState(cwd, patch) {
   const state = readLoopState(cwd);
-  const next = { ...state, ...patch };
+  const next = mergeLoopState(state, patch);
   writeLoopState(cwd, next);
   return next;
 }
