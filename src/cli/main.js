@@ -38,7 +38,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
         model: o.model,
         thinking: o.thinking,
         once: Boolean(o.once),
-        interval: o.interval ? Number(o.interval) : undefined,
+        // event-driven driver: wake cadence from [run] wake_interval ('--interval' intentionally dropped)
       });
       break;
     }

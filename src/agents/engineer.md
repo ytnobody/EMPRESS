@@ -83,10 +83,12 @@ welcome over suites.
 5. Run the project's test command (given via config `test_command`, or check
    `empress_get_config`). Make it pass.
 6. Commit your work to the task branch.
-7. When done, mark the task in-progress→done with `empress_close_task` (with a
-   note summarizing what you did, the test result, your `ponytail:` markers, and
-   your **handoff list** of `[ASSUMPTION]` items if any), or leave a comment via
-   `empress_task_comment` if there's something the Superintendent needs.
+7. When done, **do NOT close the task yourself** — closing belongs to the
+   Superintendent after CI/risk/landing (a task closed early becomes a
+   done-but-unlanded orphan the loop never picks up). Instead leave a status
+   comment via `empress_task_comment` (author `engineer`) summarizing: what you
+   did, the test result, your `ponytail:` markers, your **handoff list** of
+   `[ASSUMPTION]` items, and whether it is ready to land.
 
 ## Final report (to the Superintendent)
 
