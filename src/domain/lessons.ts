@@ -2,14 +2,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { EMPRESS_DIR } from "../shared/config.ts";
+import type { Config } from "../shared/config.ts";
 import { jevOne, jevAvailable } from "./jev.ts";
 
-function lessonsFile(cwd) {
+function lessonsFile(cwd: string): string {
   return path.join(cwd, EMPRESS_DIR, "lessons.md");
 }
 
 /** Read lessons as an array of {id, text}. */
-export function getLessons(cwd, { limit = 15 } = {}) {
+export function getLessons(cwd: string, { limit = 15 }: { limit?: number } = {}): { id: number; text: string }[] {
   const file = lessonsFile(cwd);
   if (!fs.existsSync(file)) return [];
   const out = [];
@@ -21,7 +22,7 @@ export function getLessons(cwd, { limit = 15 } = {}) {
 }
 
 /** Append a lesson, deduping by normalized text. */
-export function addLesson(cwd, text) {
+export function addLesson(cwd: string, text: string): boolean {
   const existing = getLessons(cwd, { limit: 1000 }).map((l) => l.text.trim().toLowerCase());
   const norm = String(text).trim();
   if (!norm) return false;
@@ -38,7 +39,10 @@ export function addLesson(cwd, text) {
  * Score the quality of a task/instruction (0-100) to decide whether a lesson is warranted.
  * Deterministic baseline (HERMIT-compatible) + optional Jev score refinement.
  */
-export async function evaluateInstruction(config, { riskLevel, hadClarification, multiplePRs, ciFailed }) {
+export async function evaluateInstruction(
+  config: Config,
+  { riskLevel, hadClarification, multiplePRs, ciFailed }: { riskLevel: string; hadClarification: boolean; multiplePRs: boolean; ciFailed: boolean }
+): Promise<number> {
   const risk = config.risk || {};
   let score = 100;
   if (riskLevel === "HIGH") score -= 30;

@@ -19,6 +19,8 @@
 
 import { diffBetween, diffPatch } from "./git.ts";
 import { jevJudge, jevAvailable } from "./jev.ts";
+import type { Config } from "../shared/config.ts";
+import type { Task } from "./tasks.ts";
 
 export const SECRET_PATTERNS = [
   { name: "aws-access-key", re: /AKIA[0-9A-Z]{16}/ },
@@ -41,23 +43,27 @@ export const DANGEROUS_PATTERNS = [
   { name: "sh-c-injection", re: /\b(?:sh|bash|zsh)\s+-c\b[^\n]*\$\{/ },
 ];
 
+interface DiffScan { secrets: string[]; dangerous: string[] }
+interface ConvSignals { testsChanged: boolean; codeWithoutTests: boolean }
+type TriageSignal = "ok" | "review";
+
 /**
  * Pure: scan diff text for secret / dangerous patterns.
  * @returns {{secrets:string[], dangerous:string[]}}
  */
-export function scanDiff(patchText) {
+export function scanDiff(patchText: string): DiffScan {
   const text = String(patchText || "");
-  const secrets = [];
-  const dangerous = [];
+  const secrets: string[] = [];
+  const dangerous: string[] = [];
   for (const p of SECRET_PATTERNS) if (p.re.test(text)) secrets.push(p.name);
   for (const p of DANGEROUS_PATTERNS) if (p.re.test(text)) dangerous.push(p.name);
   return { secrets, dangerous };
 }
 
 /** Pure: convention signals from the changed-file list. */
-export function conventionSignals(changedFiles) {
+export function conventionSignals(changedFiles: string[]): ConvSignals {
   const files = Array.isArray(changedFiles) ? changedFiles : [];
-  const isTest = (f) => /(^|[/\\])(test|tests|__tests__)([/\\]|$)|\.(test|spec)\.[a-z0-9]+$/i.test(f) || /_test\./i.test(f);
+  const isTest = (f: string) => /(^|[/\\])(test|tests|__tests__)([/\\]|$)|\.(test|spec)\.[a-z0-9]+$/i.test(f) || /_test\./i.test(f);
   const tests = files.filter(isTest);
   const code = files.filter((f) => !isTest(f) && /\.(js|ts|jsx|tsx|go|py|rb|rs|java|c|cpp|sh|pl|php|swift)$/.test(f || ""));
   return {
@@ -67,21 +73,15 @@ export function conventionSignals(changedFiles) {
 }
 
 /** Build the Jev state for the one-question noul call. */
-export function buildTriageState({ taskTitle, diffSummary }) {
+export function buildTriageState({ taskTitle, diffSummary }: { taskTitle: string; diffSummary: string }): string {
   return `task: ${taskTitle}\n\n${String(diffSummary || "").slice(0, 4000)}`;
 }
 
 /**
  * Pure: decide the review signal.
- * @param {object} o
- * @param {{secrets:string[], dangerous:string[]}} o.deterministic
- * @param {{testsChanged:boolean, codeWithoutTests:boolean}} o.conv
- * @param {number|null} o.jevNoul  0..1, or null when the Jev tier was not used
- * @param {boolean} o.jevError
- * @param {number} [o.threshold]
- * @returns {{signal:"ok"|"review", reasons:string[], degraded:boolean}}
+ * @returns {{signal: TriageSignal, reasons:string[], degraded:boolean}}
  */
-export function decideTriage({ deterministic, conv, jevNoul, jevError = false, threshold = 0.5 }) {
+export function decideTriage({ deterministic, conv, jevNoul, jevError = false, threshold = 0.5 }: { deterministic?: DiffScan; conv?: ConvSignals; jevNoul: number | null; jevError?: boolean; threshold?: number }): { signal: TriageSignal; reasons: string[]; degraded: boolean } {
   const reasons = [];
   if (deterministic?.secrets?.length) {
     reasons.push(`deterministic: secrets ${deterministic.secrets.join(", ")}`);
@@ -113,9 +113,13 @@ export function decideTriage({ deterministic, conv, jevNoul, jevError = false, t
 
 /**
  * Run the full triage for a task branch.
- * @returns {Promise<{signal:"ok"|"review", reasons:string[], degraded:boolean, deterministic:object, jeevNoul:number|null}>}
  */
-export async function runTriage(cwd, config, task, opts = {}) {
+export async function runTriage(
+  cwd: string,
+  config: Config,
+  task: Task,
+  opts: { _diffPatch?: typeof diffPatch; _diffBetween?: typeof diffBetween; _jevJudge?: typeof jevJudge; forceJev?: boolean; apiKey?: string; threshold?: number } = {}
+): Promise<{ signal: TriageSignal; reasons: string[]; degraded: boolean; deterministic: DiffScan; conv: ConvSignals; jevNoul: number | null }> {
   const _diffPatch = opts._diffPatch ?? diffPatch;
   const _diffBetween = opts._diffBetween ?? diffBetween;
   const _jevJudge = opts._jevJudge ?? jevJudge;

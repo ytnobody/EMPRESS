@@ -2,10 +2,14 @@
 // optional Jev System One judgment on the actual diff.
 import { diffBetween, diffPatch } from "./git.ts";
 import { jevOne, jevAvailable } from "./jev.ts";
+import type { Config } from "../shared/config.ts";
+import type { Task } from "./tasks.ts";
 
-const SEVERITY = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+type Severity = "LOW" | "MEDIUM" | "HIGH";
 
-function matchesPath(changedFile, patterns) {
+const SEVERITY: Record<Severity, number> = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+
+function matchesPath(changedFile: string, patterns: string[]): boolean {
   if (!changedFile) return false;
   for (const pat of patterns || []) {
     const p = String(pat);
@@ -17,7 +21,10 @@ function matchesPath(changedFile, patterns) {
 }
 
 /** Deterministic risk evaluation from a diff + config. */
-export function deterministicRisk({ files, insertions, deletions, changed }, risk) {
+export function deterministicRisk(
+  { files, insertions, deletions, changed }: { files: number; insertions: number; deletions: number; changed: string[] },
+  risk: Config["risk"]
+): { level: Severity; reasons: string[]; files: number; lines: number } {
   const lines = (insertions || 0) + (deletions || 0);
   const reasons = [];
   const highPaths = risk.high_paths || [];
@@ -54,7 +61,11 @@ export function deterministicRisk({ files, insertions, deletions, changed }, ris
  * Full evaluation: deterministic + optional Jev choice judgment.
  * @returns {Promise<{level, reasons, deterministicLevel, jev, files, lines}>}
  */
-export async function evaluateRisk(cwd, config, task) {
+export async function evaluateRisk(
+  cwd: string,
+  config: Config,
+  task: Task
+): Promise<{ level: Severity; reasons: string[]; deterministicLevel: Severity; jev: { level: Severity; confidence: number | null } | null; files: number; lines: number }> {
   const base = (config.project && config.project.base_branch) || "main";
   const branch = task.branch || `${
     (config.agent && config.agent.branch_prefix) || "empress/task"
@@ -62,7 +73,7 @@ export async function evaluateRisk(cwd, config, task) {
   const diff = diffBetween(cwd, base, branch);
   const det = deterministicRisk(diff, config.risk || {});
 
-  const out = {
+  const out: { level: Severity; reasons: string[]; deterministicLevel: Severity; jev: { level: Severity; confidence: number | null } | null; files: number; lines: number } = {
     level: det.level,
     reasons: [...det.reasons],
     deterministicLevel: det.level,
@@ -82,7 +93,7 @@ export async function evaluateRisk(cwd, config, task) {
       model: (config.jev && config.jev.model) || "jev-latest",
     });
     if (j.ok && j.value) {
-      const jLevel = String(j.value).toUpperCase();
+      const jLevel = String(j.value).toUpperCase() as Severity;
       if (["LOW", "MEDIUM", "HIGH"].includes(jLevel)) {
         out.jev = { level: jLevel, confidence: j.confidence };
         out.reasons.push(`Jev: ${jLevel.toLowerCase()} (conf ${j.confidence == null ? "?" : j.confidence.toFixed(2)})`);
