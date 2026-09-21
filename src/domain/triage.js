@@ -17,7 +17,7 @@
 // PFT: scanning and decision logic are pure; only the Jev call and diff fetch
 // are injectable so tests need no network.
 
-import { diffPatch } from "./git.js";
+import { diffBetween, diffPatch } from "./git.js";
 import { jevJudge, jevAvailable } from "./jev.js";
 
 export const SECRET_PATTERNS = [
@@ -117,13 +117,16 @@ export function decideTriage({ deterministic, conv, jevNoul, jevError = false, t
  */
 export async function runTriage(cwd, config, task, opts = {}) {
   const _diffPatch = opts._diffPatch ?? diffPatch;
+  const _diffBetween = opts._diffBetween ?? diffBetween;
   const _jevJudge = opts._jevJudge ?? jevJudge;
   const base = config.project?.base_branch || "main";
   const branch = task.branch || `${config.agent?.branch_prefix || "empress/task"}-${task.id}`;
 
   const patch = _diffPatch(cwd, base, branch);
   const deterministic = scanDiff(patch);
-  const conv = conventionSignals(patch ? extractChangedPaths(patch) : []);
+  // Authoritative changed list from git --numstat (not the --stat header parser).
+  const changed = _diffBetween(cwd, base, branch).changed;
+  const conv = conventionSignals(changed);
 
   // forceJev: true really forces the Jev tier (env-independent for tests);
   // otherwise gate on the ambient key (missing key => degraded deterministic).
@@ -147,18 +150,4 @@ export async function runTriage(cwd, config, task, opts = {}) {
   }
 
   return { ...decideTriage({ deterministic, conv, jevNoul, jevError, threshold: opts.threshold ?? 0.5 }), deterministic, conv, jevNoul };
-}
-
-/** Extract changed file paths from the `git diff --stat` header (before the patch body). */
-function extractChangedPaths(patch) {
-  const head = String(patch || "").split(/\n(?=diff --git|index )/)[0];
-  const paths = [];
-  for (const line of head.split("\n")) {
-    const m = /^\s*([^|]+)\s+\|/.exec(line);
-    if (m) {
-      const p = m[1].trim();
-      if (p && !/^(files? changed|\d+ files?)/i.test(p)) paths.push(p);
-    }
-  }
-  return paths;
 }
