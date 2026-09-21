@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, EMPRESS_DIR } from "../shared/config.ts";
-import { initProject } from "./init.ts";
+import { initProject, type InitOpts } from "./init.ts";
 import { runLoop } from "./run.ts";
 import { doctor } from "./doctor.ts";
 import { readLoopState, patchLoopState } from "./state.ts";
@@ -12,8 +12,15 @@ import { createTask, listTasks, removeTask } from "../domain/tasks.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function version() {
-  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "..", "package.json"), "utf-8"));
+/** A parsed CLI flag value: always a string or a boolean true (bare flag). `_` holds positional args. */
+type FlagValue = string | boolean;
+interface Flags {
+  [key: string]: FlagValue | string[] | undefined;
+  _?: string[];
+}
+
+function version(): string {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "..", "package.json"), "utf-8")) as { version: string };
   return pkg.version;
 }
 
@@ -22,7 +29,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
   switch (cmd) {
     case "init": {
       const opts = parseFlags(rest);
-      const res = await initProject(cwd, opts);
+      const res = await initProject(cwd, opts as InitOpts);
       console.log("empress: project initialized.");
       console.log(`  config   : ${res.config}`);
       console.log(`  tasks    : ${res.tasksDir}`);
@@ -35,8 +42,8 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
     case "run": {
       const o = parseFlags(rest);
       await runLoop(cwd, {
-        model: o.model,
-        thinking: o.thinking,
+        model: typeof o.model === "string" ? o.model : undefined,
+        thinking: typeof o.thinking === "string" ? o.thinking : undefined,
         once: Boolean(o.once),
         // event-driven driver: wake cadence from [run] wake_interval ('--interval' intentionally dropped)
       });
@@ -65,10 +72,10 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
       }
       const task = createTask(cwd, {
         title,
-        purpose: o.purpose,
-        scope: o.scope,
-        acceptance: o.acceptance ? [o.acceptance] : [],
-        nongoals: o.nongoal ? [o.nongoal] : [],
+        purpose: typeof o.purpose === "string" ? o.purpose : undefined,
+        scope: typeof o.scope === "string" ? o.scope : undefined,
+        acceptance: typeof o.acceptance === "string" ? [o.acceptance] : [],
+        nongoals: typeof o.nongoal === "string" ? [o.nongoal] : [],
       });
       console.log(`empress: created task #${task.id} -> ${task.file}`);
       break;
@@ -122,7 +129,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
   }
 }
 
-function printHelp(ver) {
+function printHelp(ver: string) {
   console.log(`empress ${ver} — fully-automatic development harness on pi (local git + Jev).`);
   console.log("");
   console.log("Usage:");
@@ -138,9 +145,9 @@ function printHelp(ver) {
 }
 
 /** Light-weight flag parser. Supports `--flag`, `--flag=value`, and `--flag value`. */
-function parseFlags(args) {
-  const out = {};
-  const rest = [];
+function parseFlags(args: string[]): Flags {
+  const out: Flags = {};
+  const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith("--")) {

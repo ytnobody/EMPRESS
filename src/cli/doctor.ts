@@ -6,9 +6,11 @@ import { run } from "../shared/shell.ts";
 import { isGitRepo } from "../domain/git.ts";
 import { jevAvailable } from "../domain/jev.ts";
 
-export async function doctor(cwd) {
-  const checks = [];
-  const okChecks = [];
+type Check = [name: string, pass: boolean, msg: string];
+
+export async function doctor(cwd: string) {
+  const checks: Check[] = [];
+  const okChecks: string[] = [];
 
   const gitRes = run("git", ["--version"]);
   const gitOk = gitRes.code === 0;
