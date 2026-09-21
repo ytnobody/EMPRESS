@@ -93,18 +93,41 @@ test("buildTriageState: bundles task title and diff", () => {
   assert.match(s, /\+a/);
 });
 
-// Verifies: runTriage end-to-end with injected diff + Jev (ok path).
+// Verifies: runTriage end-to-end with injected diff + Jev (ok path); conv is
+// derived from diffBetween changed list (tests present => no PFT flag).
 test("runTriage: end-to-end with injected deps -> ok (Jev used)", async () => {
   const config = { project: { base_branch: "main" }, agent: { branch_prefix: "empress/task" } };
   const task = { id: 3, title: "T", branch: "empress/task-3" };
   const r = await runTriage("/repo", config, task, {
     forceJev: true, // bypass jevAvailable check for the test
+    _diffBetween: () => ({ files: 2, insertions: 5, deletions: 0, changed: ["src/a.js", "test/a.test.mjs"] }),
     _diffPatch: () => " src/a.js | 2 +-\n test/a.test.mjs | 3 ++\n 2 files changed\n\ndiff --git a/src/a.js b/src/a.js\n+export const fine = 1;\n",
     _jevJudge: async () => ({ ok: true, results: [{ answer: { noul: 0.2 } }] }),
   });
   assert.equal(r.signal, "ok");
   assert.equal(r.degraded, false);
   assert.equal(r.jevNoul, 0.2);
+  assert.equal(r.conv.testsChanged, true);
+  assert.equal(r.conv.codeWithoutTests, false);
+});
+
+// Verifies: convention signals come from the diffBetween changed list, not the
+// --stat header in the patch text (patch header is empty here, yet code-only is caught).
+test("runTriage: conv derived from diffBetween changed list (not --stat header)", async () => {
+  const config = { project: { base_branch: "main" }, agent: { branch_prefix: "empress/task" } };
+  const task = { id: 9, title: "T", branch: "empress/task-9" };
+  const r = await runTriage("/repo", config, task, {
+    forceJev: true,
+    // changed says code-only (no tests) -> codeWithoutTests must be true,
+    // even though the patch text has no --stat header to parse.
+    _diffBetween: () => ({ files: 1, insertions: 2, deletions: 0, changed: ["src/c.js"] }),
+    _diffPatch: () => "diff --git a/src/c.js b/src/c.js\n+export const c = 1;\n",
+    _jevJudge: async () => ({ ok: true, results: [{ answer: { noul: 0.1 } }] }),
+  });
+  assert.equal(r.conv.codeWithoutTests, true);
+  assert.equal(r.conv.testsChanged, false);
+  assert.equal(r.signal, "review");
+  assert.match(r.reasons.join(" "), /convention/);
 });
 
 // Verifies: runTriage escalates on a deterministic secret hit.
@@ -113,6 +136,7 @@ test("runTriage: deterministic secret hit -> review", async () => {
   const task = { id: 4, title: "T", branch: "empress/task-4" };
   const r = await runTriage("/repo", config, task, {
     forceJev: true,
+    _diffBetween: () => ({ files: 1, insertions: 1, deletions: 0, changed: ["src/b.js"] }),
     _diffPatch: () => " src/b.js | 2 +-\n 1 file changed\n\ndiff --git a/src/b.js b/src/b.js\n+const token = \"x_TOP_SECRET_123456\";\n",
     _jevJudge: async () => ({ ok: true, results: [{ answer: { noul: 0.1 } }] }),
   });
