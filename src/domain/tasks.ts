@@ -6,31 +6,55 @@ import { readMd, writeMd, parseMdFile } from "../shared/frontmatter.ts";
 
 export const TASK_STATUSES = ["open", "assigned", "in-progress", "done", "blocked"];
 
-function tasksDir(cwd) {
+export interface TaskComment {
+  at: string;
+  author: string;
+  body: string;
+}
+
+export interface Task {
+  id: number;
+  file: string;
+  title: string;
+  status: string;
+  assignee: string;
+  labels: string[];
+  needs_clarification: boolean;
+  branch: string;
+  created: string;
+  comments: TaskComment[];
+  body: string;
+}
+
+function tasksDir(cwd: string): string {
   return path.join(cwd, EMPRESS_DIR, "tasks");
 }
 
 /** Read a task file into a normalized object. */
-export function readTaskFile(file) {
+export function readTaskFile(file: string): Task {
   const { frontmatter, body } = parseMdFile(fs.readFileSync(file, "utf-8"));
   const id = Number(frontmatter.id ?? path.basename(file).split("-")[0]);
   return {
     id,
     file,
-    title: frontmatter.title ?? "",
-    status: TASK_STATUSES.includes(frontmatter.status) ? frontmatter.status : "open",
-    assignee: frontmatter.assignee ?? "",
-    labels: frontmatter.labels ?? [],
+    title: String(frontmatter.title ?? ""),
+    status: TASK_STATUSES.includes(frontmatter.status as string)
+      ? (frontmatter.status as string)
+      : "open",
+    assignee: String(frontmatter.assignee ?? ""),
+    labels: (frontmatter.labels as string[] | undefined) ?? [],
     needs_clarification: Boolean(frontmatter.needs_clarification),
-    branch: frontmatter.branch ?? "",
-    created: frontmatter.created ?? "",
-    comments: Array.isArray(frontmatter.comments) ? frontmatter.comments : [],
+    branch: String(frontmatter.branch ?? ""),
+    created: String(frontmatter.created ?? ""),
+    comments: Array.isArray(frontmatter.comments)
+      ? (frontmatter.comments as TaskComment[])
+      : [],
     body,
   };
 }
 
 /** List task files sorted by id ascending. */
-export function listTaskFiles(cwd) {
+export function listTaskFiles(cwd: string): string[] {
   const dir = tasksDir(cwd);
   if (!fs.existsSync(dir)) return [];
   return fs
@@ -48,21 +72,19 @@ export function listTaskFiles(cwd) {
  * List tasks. By default only actionable tasks are returned (not needs_clarification,
  * not done). Pass includeAll to see everything.
  */
-export function listTasks(cwd, { includeAll = false } = {}) {
+export function listTasks(cwd: string, { includeAll = false } = {}): Task[] {
   return listTaskFiles(cwd)
     .map(readTaskFile)
-    .filter(
-      (t) => includeAll || (t.status !== "done" && !t.needs_clarification)
-    );
+    .filter((t) => includeAll || (t.status !== "done" && !t.needs_clarification));
 }
 
-export function getTask(cwd, id) {
+export function getTask(cwd: string, id: number): Task | null {
   const file = findTaskFile(cwd, id);
   if (!file) return null;
   return readTaskFile(file);
 }
 
-function findTaskFile(cwd, id) {
+function findTaskFile(cwd: string, id: number): string | null {
   const idStr = String(id).padStart(4, "0");
   for (const f of listTaskFiles(cwd)) {
     if (path.basename(f).split("-")[0] === idStr || path.basename(f).split("-")[0] === String(id)) {
@@ -72,7 +94,7 @@ function findTaskFile(cwd, id) {
   return null;
 }
 
-function nextId(cwd) {
+function nextId(cwd: string): number {
   const files = listTaskFiles(cwd);
   let max = 0;
   for (const f of files) {
@@ -82,19 +104,38 @@ function nextId(cwd) {
   return max + 1;
 }
 
-function slugify(s) {
-  return (s || "task")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "task";
+function slugify(s: string): string {
+  return (
+    (s || "task")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "task"
+  );
 }
 
 /**
  * Create a new task file from a title and structured body parts.
  * Markdown sections mirror the readiness hearing: Purpose / Scope / Acceptance Criteria / Non-Goals.
  */
-export function createTask(cwd, { title, purpose = "", scope = "", acceptance = [], nongoals = [], labels = [] }) {
+export function createTask(
+  cwd: string,
+  {
+    title,
+    purpose = "",
+    scope = "",
+    acceptance = [],
+    nongoals = [],
+    labels = [],
+  }: {
+    title: string;
+    purpose?: string;
+    scope?: string;
+    acceptance?: string[];
+    nongoals?: string[];
+    labels?: string[];
+  }
+): Task {
   fs.mkdirSync(tasksDir(cwd), { recursive: true });
   const id = nextId(cwd);
   const file = path.join(tasksDir(cwd), `${String(id).padStart(4, "0")}-${slugify(title)}.md`);
@@ -128,40 +169,54 @@ export function createTask(cwd, { title, purpose = "", scope = "", acceptance = 
     needs_clarification: false,
     branch: "",
     created: new Date().toISOString(),
-    comments: [],
+    comments: [] as TaskComment[],
   };
   writeMd(file, fm, body);
   return readTaskFile(file);
 }
 
 /** Update selected frontmatter keys (and/or body). */
-export function updateTask(cwd, id, patch = {}, newBody) {
+export function updateTask(
+  cwd: string,
+  id: number,
+  patch: Partial<Task> = {},
+  newBody?: string
+): Task | null {
   const file = findTaskFile(cwd, id);
   if (!file) return null;
   const cur = parseMdFile(fs.readFileSync(file, "utf-8"));
   const fm = { ...cur.frontmatter };
-  for (const k of ["title", "status", "assignee", "labels", "needs_clarification", "branch", "comments"]) {
+  const keys = [
+    "title",
+    "status",
+    "assignee",
+    "labels",
+    "needs_clarification",
+    "branch",
+    "comments",
+  ] as const;
+  for (const k of keys) {
     if (k in patch) fm[k] = patch[k];
   }
   writeMd(file, fm, newBody ?? cur.body);
   return readTaskFile(file);
 }
 
-export function addComment(cwd, id, author, body) {
+export function addComment(cwd: string, id: number, author: string, body: string): Task | null {
   const t = getTask(cwd, id);
   if (!t) return null;
   const comments = [...t.comments, { at: new Date().toISOString(), author, body }];
   return updateTask(cwd, id, { comments });
 }
 
-export function closeTask(cwd, id, note = "") {
+export function closeTask(cwd: string, id: number, note = ""): Task | null {
   const t = getTask(cwd, id);
   if (!t) return null;
   if (note) addComment(cwd, id, "empress", note);
   return updateTask(cwd, id, { status: "done" });
 }
 
-export function removeTask(cwd, id) {
+export function removeTask(cwd: string, id: number): boolean {
   const file = findTaskFile(cwd, id);
   if (!file) return false;
   fs.unlinkSync(file);
@@ -169,7 +224,7 @@ export function removeTask(cwd, id) {
 }
 
 /** Human-readable single-line summary of a task for passing to an Engineer. */
-export function taskBrief(t) {
+export function taskBrief(t: Task): string {
   return [
     `Task #${t.id}: ${t.title}`,
     `Status: ${t.status}`,

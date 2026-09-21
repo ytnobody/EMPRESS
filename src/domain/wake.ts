@@ -10,9 +10,9 @@ import { EMPRESS_DIR } from "../shared/config.ts";
  * Content hash of the task queue (file names + contents). Deterministic and
  * free; changes iff a task was created, edited, or removed.
  */
-export function tasksHash(cwd) {
+export function tasksHash(cwd: string): string {
   const dir = path.join(cwd, EMPRESS_DIR, "tasks");
-  let files = [];
+  let files: string[] = [];
   try {
     files = fs.readdirSync(dir).sort();
   } catch {

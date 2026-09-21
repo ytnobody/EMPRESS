@@ -15,65 +15,111 @@ const API_URL = "https://api.typesafe.ai/v1/systemone";
 
 const TYPES = ["choice", "score", "noul"];
 
-// --- Pure: build the System One request body ---------------------------------
+export type JevType = "choice" | "score" | "noul";
 
-/**
- * Build the JSON request body for one System One judgment.
- * @returns {{state:string, model:string, questions:{q:{type:string,instructions:string,criteria?:any}}}}
- */
-export function buildSystemOneRequest({ type, instructions, state, model = "jev-latest", criteria, options = [] }) {
+/** Criteria shape: ordered list (score) or name->description dict (choice/noul). */
+export type JevCriteria = string[] | Record<string, string>;
+
+export interface SystemOneRequest {
+  state: string;
+  model: string;
+  questions: {
+    q: { type: string; instructions: string; criteria?: JevCriteria };
+  };
+}
+
+export function buildSystemOneRequest({
+  type,
+  instructions,
+  state,
+  model = "jev-latest",
+  criteria,
+  options = [],
+}: {
+  type: string;
+  instructions: string;
+  state: unknown;
+  model?: string;
+  criteria?: JevCriteria;
+  options?: string[];
+}): SystemOneRequest {
   if (!TYPES.includes(type)) throw new Error(`invalid Jev type "${type}"`);
-  const q = { type, instructions };
+  const q: SystemOneRequest["questions"]["q"] = { type, instructions };
   if (criteria) q.criteria = criteria;
   else if (options.length) q.criteria = buildCriteria(type, options);
   return { state: String(state ?? ""), model, questions: { q } };
 }
 
 /** Pure: choice wants a dict (name->description), score wants an ordered list. */
-export function buildCriteria(type, options) {
+export function buildCriteria(type: string, options: string[]): JevCriteria {
   if (type === "score") return options.slice();
-  const dict = {};
+  const dict: Record<string, string> = {};
   for (const o of options) dict[o] = o;
   return dict;
 }
 
 // --- Pure: map a System One answer to a scalar + confidence ------------------
 
+export interface SystemOneAnswer {
+  noul?: number;
+  choice?: string;
+  score?: number;
+  confidence?: number;
+}
+
 /**
  * Reduce a raw System One answer object to { value, confidence, raw }.
  * noul -> probability number; choice -> picked string; score -> weighted number.
  */
-export function parseAnswer(answer) {
+export function parseAnswer(
+  answer: unknown
+): { value: number | string | null; confidence: number | null; raw: unknown } {
   if (answer === null || typeof answer !== "object") {
     return { value: null, confidence: null, raw: answer };
   }
+  const a = answer as SystemOneAnswer;
   return {
-    value: answer.noul ?? answer.choice ?? answer.score ?? null,
-    confidence: typeof answer.confidence === "number" ? answer.confidence : null,
+    value: a.noul ?? a.choice ?? a.score ?? null,
+    confidence: typeof a.confidence === "number" ? a.confidence : null,
     raw: answer,
   };
 }
 
 // --- Transport (injectable) ---------------------------------------------------
 
-async function defaultFetch(url, init) {
+export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
+
+async function defaultFetch(url: string, init: RequestInit): Promise<Response> {
   return fetch(url, init);
 }
 
 // --- Public batch API ----------------------------------------------------------
 
+export interface JevOptions {
+  type: string;
+  instructions: string;
+  states?: string[];
+  options?: string[];
+  criteria?: JevCriteria;
+  model?: string;
+  apiKey?: string;
+  fetchFn?: FetchFn;
+}
+
+export interface JevEntry {
+  line: number;
+  input: string;
+  answer: SystemOneAnswer | null;
+}
+
+export interface JevBatchResult {
+  ok: boolean;
+  results: JevEntry[];
+  error?: string;
+}
+
 /**
  * Run one or more judgments for a batch of states, in parallel.
- * @param {object} opts
- * @param {string} opts.type
- * @param {string} opts.instructions
- * @param {string[]} opts.states
- * @param {string[]} [opts.options]
- * @param {string} [opts.criteria]
- * @param {string} [opts.model]
- * @param {string} [opts.apiKey]
- * @param {(url:string, init:object)=>Promise<any>} [opts.fetchFn]  injected transport (for tests)
- * @returns {Promise<{ok:boolean, results:object[], error?:string}>}
  */
 export async function jevJudge({
   type,
@@ -84,12 +130,12 @@ export async function jevJudge({
   model = "jev-latest",
   apiKey,
   fetchFn = defaultFetch,
-}) {
+}: JevOptions): Promise<JevBatchResult> {
   if (!TYPES.includes(type)) return { ok: false, results: [], error: `invalid type "${type}"` };
   const key = apiKey ?? process.env.TYPESAFE_API_KEY;
 
-  const results = [];
-  let failed = null;
+  const results: JevEntry[] = [];
+  let failed: string | null = null;
   await Promise.all(
     states.map(async (state, i) => {
       const body = buildSystemOneRequest({ type, instructions, state, model, criteria, options });
@@ -103,13 +149,13 @@ export async function jevJudge({
           const text = await res.text().catch(() => "");
           throw new Error(`Jev HTTP ${res.status}: ${text.slice(0, 300)}`);
         }
-        const parsed = await res.json();
+        const parsed = (await res.json()) as { answers?: { q?: SystemOneAnswer | null } };
         const answer = parsed?.answers?.["q"] ?? null;
         // map by input line, not completion order: parallel fetches may settle in
         // any order, so assign at results[i] (input index) rather than push().
         results[i] = { line: i + 1, input: state, answer };
       } catch (e) {
-        failed = failed || `state ${i + 1}: ${e.message}`;
+        failed = failed || `state ${i + 1}: ${e instanceof Error ? e.message : String(e)}`;
       }
     })
   );
@@ -121,7 +167,15 @@ export async function jevJudge({
 /**
  * Convenience: single-judgment call. Returns { ok, value, confidence, raw, error }.
  */
-export async function jevOne(opts) {
+export async function jevOne(
+  opts: JevOptions & { state?: string }
+): Promise<{
+  ok: boolean;
+  value: number | string | null;
+  confidence: number | null;
+  raw: unknown;
+  error?: string;
+}> {
   const r = await jevJudge({ ...opts, states: [opts.state ?? ""] });
   if (!r.ok || !r.results[0]) {
     return { ok: false, value: null, confidence: null, raw: null, error: r.error || "no result" };
@@ -134,7 +188,9 @@ export async function jevOne(opts) {
  * fall back to deterministic rules. The old `command` arg is accepted and ignored
  * (kept for call-compat during the chariot removal).
  */
-export function jevAvailable(command) {
+export function jevAvailable(
+  command?: string
+): { chariot: boolean; apiKey: boolean; available: boolean } {
   const apiKey = Boolean(process.env.TYPESAFE_API_KEY);
   return { chariot: command !== "", apiKey, available: apiKey };
 }
