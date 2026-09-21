@@ -32,6 +32,19 @@ test("tasksHash: stable for same content, changes on mutation", () => {
   assert.notEqual(tasksHash(dir), h1);
 });
 
+// Verifies: non-.md entries (.probe/temp noise) do not change the wake hash
+// (only .md task files are hashed, so adding non-md content cannot change it).
+test("tasksHash: non-md files leave the hash unchanged", () => {
+  const { dir } = mkTasksDir({ "0001-a.md": "x" });
+  const h1 = tasksHash(dir);
+  fs.writeFileSync(path.join(dir, ".empress", "tasks", ".probe"), "noise");
+  assert.equal(tasksHash(dir), h1); // unchanged: only .md entries count
+  fs.writeFileSync(path.join(dir, ".empress", "tasks", "scratch.tmp"), "more noise");
+  assert.equal(tasksHash(dir), h1); // still unchanged
+  fs.writeFileSync(path.join(dir, ".empress", "tasks", "0002-b.md"), "y");
+  assert.notEqual(tasksHash(dir), h1); // a real task file still wakes the loop
+});
+
 // Verifies: empty/missing tasks dir produces a hash (no throw).
 test("tasksHash: missing dir is handled (empty hash, no throw)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wake-empty-"));

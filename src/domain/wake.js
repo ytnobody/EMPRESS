@@ -20,6 +20,7 @@ export function tasksHash(cwd) {
   }
   const h = createHash("sha256");
   for (const f of files) {
+    if (!f.endsWith(".md")) continue; // non-task noise (.probe/temp) must not wake the loop
     h.update(f);
     try {
       h.update(fs.readFileSync(path.join(dir, f)));
