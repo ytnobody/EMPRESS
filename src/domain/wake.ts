@@ -4,7 +4,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { EMPRESS_DIR } from "../shared/config.js";
+import { EMPRESS_DIR } from "../shared/config.ts";
 
 /**
  * Content hash of the task queue (file names + contents). Deterministic and

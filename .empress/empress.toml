@@ -3,7 +3,7 @@
 
 [project]
 base_branch = "main"
-test_command = "node scripts/selfcheck.js"
+test_command = "bun scripts/selfcheck.ts"
 language = "en"
 
 [agent]
@@ -39,7 +39,7 @@ failure_notify_threshold = 3
 
 [ci]
 engine = "podman"
-image = "node:22-alpine"
+image = "oven/bun:1.4-alpine"
 network = "default"
 
 [run]

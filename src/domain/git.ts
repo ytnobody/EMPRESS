@@ -1,8 +1,8 @@
 // Local git operations: worktrees, branches, diffs, merges. No GitHub.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EMPRESS_DIR } from "../shared/config.js";
-import { git, run } from "../shared/shell.js";
+import { EMPRESS_DIR } from "../shared/config.ts";
+import { git, run } from "../shared/shell.ts";
 
 export function isGitRepo(cwd) {
   return run("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"]).code === 0;

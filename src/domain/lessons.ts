@@ -1,8 +1,8 @@
 // Lessons store: append-only .empress/lessons.md, with optional Jev quality scoring.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EMPRESS_DIR } from "../shared/config.js";
-import { jevOne, jevAvailable } from "./jev.js";
+import { EMPRESS_DIR } from "../shared/config.ts";
+import { jevOne, jevAvailable } from "./jev.ts";
 
 function lessonsFile(cwd) {
   return path.join(cwd, EMPRESS_DIR, "lessons.md");

@@ -1,10 +1,10 @@
 // `empress doctor`: prerequisite / environment checks.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EMPRESS_DIR } from "../shared/config.js";
-import { run } from "../shared/shell.js";
-import { isGitRepo } from "../domain/git.js";
-import { jevAvailable } from "../domain/jev.js";
+import { EMPRESS_DIR } from "../shared/config.ts";
+import { run } from "../shared/shell.ts";
+import { isGitRepo } from "../domain/git.ts";
+import { jevAvailable } from "../domain/jev.ts";
 
 export async function doctor(cwd) {
   const checks = [];

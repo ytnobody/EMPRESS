@@ -3,12 +3,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig, EMPRESS_DIR } from "../shared/config.js";
-import { initProject } from "./init.js";
-import { runLoop } from "./run.js";
-import { doctor } from "./doctor.js";
-import { readLoopState, patchLoopState } from "./state.js";
-import { createTask, listTasks, removeTask } from "../domain/tasks.js";
+import { loadConfig, EMPRESS_DIR } from "../shared/config.ts";
+import { initProject } from "./init.ts";
+import { runLoop } from "./run.ts";
+import { doctor } from "./doctor.ts";
+import { readLoopState, patchLoopState } from "./state.ts";
+import { createTask, listTasks, removeTask } from "../domain/tasks.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

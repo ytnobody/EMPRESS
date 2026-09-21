@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { loadConfig, resolveProjectRoot } from "../shared/config.js";
+import { loadConfig, resolveProjectRoot } from "../shared/config.ts";
 import {
   listTasks,
   getTask,
@@ -17,20 +17,20 @@ import {
   addComment,
   closeTask,
   taskBrief,
-} from "../domain/tasks.js";
+} from "../domain/tasks.ts";
 import {
   createWorktree,
   removeWorktree,
   listBranches,
   landBranch,
   isGitRepo,
-} from "../domain/git.js";
-import { runProjectCi } from "../domain/ci.js";
-import { runVulnCheck } from "../domain/vuln.js";
-import { runTriage } from "../domain/triage.js";
-import { evaluateRisk } from "../domain/risk.js";
-import { checkReadiness } from "../domain/readiness.js";
-import { getLessons, addLesson } from "../domain/lessons.js";
+} from "../domain/git.ts";
+import { runProjectCi } from "../domain/ci.ts";
+import { runVulnCheck } from "../domain/vuln.ts";
+import { runTriage } from "../domain/triage.ts";
+import { evaluateRisk } from "../domain/risk.ts";
+import { checkReadiness } from "../domain/readiness.ts";
+import { getLessons, addLesson } from "../domain/lessons.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -1,7 +1,7 @@
 // Risk evaluation: deterministic heuristics (HERMIT-compatible) blended with an
 // optional Jev System One judgment on the actual diff.
-import { diffBetween, diffPatch } from "./git.js";
-import { jevOne, jevAvailable } from "./jev.js";
+import { diffBetween, diffPatch } from "./git.ts";
+import { jevOne, jevAvailable } from "./jev.ts";
 
 const SEVERITY = { LOW: 1, MEDIUM: 2, HIGH: 3 };
 

@@ -25,23 +25,23 @@ HERMIT→EMPRESS mapping.
 
 | Tool | Required | Notes |
 |---|---|---|
-| **Node.js ≥ 18** | ✅ | runs the `empress` CLI |
+| **Bun ≥ 1.4** | ✅ | runs the `empress` CLI (using a single self-contained TypeScript entry) |
 | **pi** | ✅ | the harness brain (`pi -p`) |
 | **git** | ✅ | worktrees / branches / merges |
 | **TYPESAFE_API_KEY** | optional | enables Jev judgments (readiness/risk/lessons); unset = deterministic rules only |
 
 ## 2. Get the `empress` command runnable
 
-The CLI is a single self-contained Node script — `node bin/empress.js`. Make it
+The CLI is a single self-contained TypeScript entry — `bin/empress.ts`, run with Bun. Make it
 callable as `empress` (pick **one**):
 
 ```sh
 # A) Put the harness dir on PATH (recommended)
 export PATH="/path/to/EMPRESS/bin:$PATH"      # add to ~/.bashrc / ~/.profile
-alias empress="node /path/to/EMPRESS/bin/empress.js"
+alias empress="bun /path/to/EMPRESS/bin/empress.ts"
 
 # B) Or symlink into a dir already on PATH
-ln -s /path/to/EMPRESS/bin/empress.js ~/bin/empress
+bun /path/to/EMPRESS/bin/empress.ts   # or: cd /path/to/EMPRESS && npm link (bin/empress.ts)
 
 # C) Or npm link (installs a global `empress` bin)
 cd /path/to/EMPRESS && npm link
@@ -73,7 +73,7 @@ empress init              # writes .empress/empress.toml + role prompts; asks ba
 > ```
 > [ci]
 > engine = "podman"     # host (default) | podman | docker
-> image  = "node:22-alpine"
+> image  = "oven/bun:1.4-alpine"
 > network = "default"    # default | none | host
 > ```
 > The worktree is mounted read-write at `/project` and the test command runs in

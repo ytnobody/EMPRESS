@@ -8,7 +8,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { run } from "../shared/shell.js";
+import { run } from "../shared/shell.ts";
 
 const SEVERITY_RANK = { critical: 4, high: 3, moderate: 2, low: 1 };
 

@@ -11,7 +11,7 @@
 // only side effect is the process spawn, which is injectable (`_run`) so tests
 // never touch a real container.
 
-import { run } from "../shared/shell.js";
+import { run } from "../shared/shell.ts";
 
 export const CI_ENGINES = ["host", "podman", "docker"];
 

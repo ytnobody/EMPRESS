@@ -1,8 +1,8 @@
 // Local task store: .empress/tasks/NNNN-title.md files with YAML-frontmatter.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EMPRESS_DIR } from "../shared/config.js";
-import { readMd, writeMd, parseMdFile } from "../shared/frontmatter.js";
+import { EMPRESS_DIR } from "../shared/config.ts";
+import { readMd, writeMd, parseMdFile } from "../shared/frontmatter.ts";
 
 export const TASK_STATUSES = ["open", "assigned", "in-progress", "done", "blocked"];
 

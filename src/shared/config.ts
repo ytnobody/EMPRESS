@@ -3,7 +3,7 @@
 // but without any GitHub section.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parseFrontmatterBlock } from "./frontmatter.js";
+import { parseFrontmatterBlock } from "./frontmatter.ts";
 
 export const CONFIG_FILENAME = "empress.toml";
 export const EMPRESS_DIR = ".empress";

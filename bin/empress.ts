@@ -1,6 +1,6 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // empress CLI entry point.
-import { main } from "../src/cli/main.js";
+import { main } from "../src/cli/main.ts";
 
 main(process.argv.slice(2), process.cwd()).then(
   () => {

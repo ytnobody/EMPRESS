@@ -17,8 +17,8 @@
 // PFT: scanning and decision logic are pure; only the Jev call and diff fetch
 // are injectable so tests need no network.
 
-import { diffBetween, diffPatch } from "./git.js";
-import { jevJudge, jevAvailable } from "./jev.js";
+import { diffBetween, diffPatch } from "./git.ts";
+import { jevJudge, jevAvailable } from "./jev.ts";
 
 export const SECRET_PATTERNS = [
   { name: "aws-access-key", re: /AKIA[0-9A-Z]{16}/ },

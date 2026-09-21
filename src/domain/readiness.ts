@@ -1,6 +1,6 @@
 // Task readiness: deterministic guards (length, acceptance-criteria section) plus
 // an optional Jev `noul` judgment on whether the task is implementable as written.
-import { jevOne, jevJudge, jevAvailable } from "./jev.js";
+import { jevOne, jevJudge, jevAvailable } from "./jev.ts";
 
 // Single source for the Jev-degradation marker: shared by checkReadyTasks (per-check
 // reason) and runLoop's last_skip_reason so consecutive failures surface visibly.

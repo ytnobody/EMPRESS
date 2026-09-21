@@ -2,8 +2,8 @@
 // loop-state helpers in src/domain/loopstate.js (default object + patch merge).
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EMPRESS_DIR } from "../shared/config.js";
-import { defaultLoopState, mergeLoopState } from "../domain/loopstate.js";
+import { EMPRESS_DIR } from "../shared/config.ts";
+import { defaultLoopState, mergeLoopState } from "../domain/loopstate.ts";
 
 function stateFile(cwd) {
   return path.join(cwd, EMPRESS_DIR, "superintendent-state.json");

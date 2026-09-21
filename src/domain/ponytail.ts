@@ -3,7 +3,7 @@
 // Mirrors the ponytail-debt skill's each-hit-one-row output.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EMPRESS_DIR } from "../shared/config.js";
+import { EMPRESS_DIR } from "../shared/config.ts";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", ".cache", EMPRESS_DIR]);
 const MARKER = /(?:#|\/\/)\s?ponytail:\s*(.*)$/i;

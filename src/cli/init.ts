@@ -4,8 +4,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { fileURLToPath } from "node:url";
-import { CONFIG_FILENAME, EMPRESS_DIR } from "../shared/config.js";
-import { writeLoopState as persistState } from "./state.js";
+import { CONFIG_FILENAME, EMPRESS_DIR } from "../shared/config.ts";
+import { writeLoopState as persistState } from "./state.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENTS_SRC = path.resolve(__dirname, "..", "agents");

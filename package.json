@@ -6,7 +6,7 @@
   "keywords": ["pi-package"],
   "license": "MIT",
   "bin": {
-    "empress": "bin/empress.js"
+    "empress": "bin/empress.ts"
   },
   "pi": {
     "extensions": ["./src/extension"],

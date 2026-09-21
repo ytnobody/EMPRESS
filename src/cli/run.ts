@@ -12,11 +12,11 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { loadConfig } from "../shared/config.js";
-import { readLoopState, patchLoopState } from "./state.js";
-import { tasksHash } from "../domain/wake.js";
-import { listTasks } from "../domain/tasks.js";
-import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../domain/readiness.js";
+import { loadConfig } from "../shared/config.ts";
+import { readLoopState, patchLoopState } from "./state.ts";
+import { tasksHash } from "../domain/wake.ts";
+import { listTasks } from "../domain/tasks.ts";
+import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../domain/readiness.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(__dirname, "..", "extension", "empress.ts");
