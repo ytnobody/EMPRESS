@@ -114,6 +114,18 @@ export function branchIsAncestor(cwd, base, branch) {
   return run("git", ["-C", cwd, "merge-base", "--is-ancestor", base, branch]).code === 0;
 }
 
+/**
+ * Pure decision for landBranch: whether to emit an update-fast-forward against
+ * origin/<base>. Returns a Command or null (no-op). Guards the origin path so a
+ * doomed `git merge --ff-only origin/<base>` is never run when that ref is absent
+ * (e.g. local-only repos with no origin remote).
+ */
+export function originUpdateCommand(base, originBaseExists) {
+  return originBaseExists
+    ? { cmd: "git", args: ["merge", "--ff-only", "origin/" + base] }
+    : null;
+}
+
 /* eslint-disable no-unused-vars */
 
 /**
@@ -131,8 +143,12 @@ export function landBranch(cwd, base, branch, { force = false } = {}) {
     if (co.code !== 0) return { merged: false, note: `could not checkout ${base}` };
   }
 
-  const updateBase = run("git", ["-C", cwd, "merge", "--ff-only", "origin/" + base]);
-  void updateBase;
+  // Update base from origin ONLY when that remote ref exists — local-only repos
+  // have no origin, so the merge would be doomed (noise + confusion).
+  const originRefExists =
+    git(cwd, "show-ref", "--verify", "--quiet", `refs/remotes/origin/${base}`) !== null;
+  const originCmd = originUpdateCommand(base, originRefExists);
+  if (originCmd) run(originCmd.cmd, ["-C", cwd, ...originCmd.args]);
 
   const merge = run("git", ["-C", cwd, "merge", "--no-edit", "--ff-only", branch]);
   if (merge.code === 0) return { merged: true, fastForwarded: true, note: "fast-forwarded" };
