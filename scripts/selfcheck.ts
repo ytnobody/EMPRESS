@@ -20,6 +20,17 @@ if (!cfg.file) {
   console.log(`config ok: ${path.relative(root, cfg.file)}`);
 }
 
+// Type check (tsc --noEmit): the project is fully typed (371 -> 0); this step
+// makes the zero-error state an enforced rule, not just a snapshot. Requires
+// typescript resolvable (host: devDeps; [ci] container: baked into the image).
+try {
+  execFileSync(process.execPath, ["typecheck"], { stdio: "inherit" });
+  console.log("typecheck: PASS");
+} catch (e) {
+  console.error(`typecheck FAIL: ${e.message}`);
+  failures++;
+}
+
 try {
   execFileSync(process.execPath, ["test", path.join(root, "test")], { stdio: "inherit" });
   console.log("unit tests: PASS");

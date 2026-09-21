@@ -8,10 +8,14 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["bun-types"],
-    "allowJs": true,
-    "checkJs": false,
+    "types": [
+      "bun-types"
+    ],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.js"]
+  "include": [
+    "src/**/*.ts",
+    "bin/**/*.ts",
+    "scripts/**/*.ts"
+  ]
 }

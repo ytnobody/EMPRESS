@@ -62,6 +62,21 @@ export function createWorktree(
     const lr2 = run("git", ["-C", cwd, "worktree", "add", worktreePath, branch]);
     if (lr2.code !== 0) throw new Error(`could not create worktree: ${res.stderr || res.stdout}`);
   }
+
+  // Link the devDeps (typescript/@types/bun for the typecheck gate) into the
+  // worktree: node_modules is git-ignored so it's not present in the worktree,
+  // which would make the land gate's `bun typecheck` (tsc) unresolvable. A
+  // symlink to the main repo's node_modules keeps host runs and the podman CI
+  // (worktree mounted at /project) both able to typecheck. Ignored by git, so
+  // it never enters the tree.
+  const mainNodeModules = path.join(cwd, "node_modules");
+  if (fs.existsSync(mainNodeModules) && !fs.existsSync(path.join(worktreePath, "node_modules"))) {
+    try {
+      fs.symlinkSync(mainNodeModules, path.join(worktreePath, "node_modules"), "dir");
+    } catch {
+      /* non-fatal: typecheck would then fail later with a clear message */
+    }
+  }
   return { branch, worktreePath, existed: false };
 }
 
