@@ -2,6 +2,15 @@
 // an optional Jev `noul` judgment on whether the task is implementable as written.
 import { jevOne, jevJudge, jevAvailable } from "./jev.js";
 
+// Single source for the Jev-degradation marker: shared by checkReadyTasks (per-check
+// reason) and runLoop's last_skip_reason so consecutive failures surface visibly.
+export const JEV_DEGRADED_REASON = "Jev unavailable (error); deterministic-only";
+
+/** Pure: consecutive Jev-failure bookkeeping. degraded => +1, recovered => reset to 0. */
+export function nextJevFailures(degraded, consecutive) {
+  return degraded ? (consecutive || 0) + 1 : 0;
+}
+
 function nonWhitespaceLen(s) {
   return (s || "").replace(/\s/g, "").length;
 }
@@ -106,12 +115,18 @@ export async function checkReadyTasks(cwd, config, tasks, { _jevJudge, _jevAvail
       const prob = raw && typeof raw.noul === "number" ? raw.noul : null;
       const threshold = ready.jev_threshold ?? 0.6;
       const pass = prob === null ? true : prob >= threshold; // Jev error is not fail-closed here (deterministic already said ready); LLM pass re-checks.
-      results.push({
-        task: t,
-        ready: pass,
-        reasons: pass ? det.reasons : [...det.reasons, `Jev ${prob.toFixed(2)} < ${threshold}`],
-        jev: prob === null ? null : { probability: prob },
-      });
+      // Jev batch error / unparseable (prob null) => deterministic-only, exactly like the
+      // no-key case (ready stays true) but VISIBLE via JEV_DEGRADED_REASON (was silent).
+      results.push(
+        prob === null
+          ? { task: t, ready: true, reasons: [...det.reasons, JEV_DEGRADED_REASON], jev: null }
+          : {
+              task: t,
+              ready: pass,
+              reasons: pass ? det.reasons : [...det.reasons, `Jev ${prob.toFixed(2)} < ${threshold}`],
+              jev: { probability: prob },
+            }
+      );
     });
   }
 

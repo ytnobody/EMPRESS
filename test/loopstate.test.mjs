@@ -11,6 +11,7 @@ test("loopstate: defaultLoopState has the running baseline", () => {
     task_comments_since: null,
     last_pass_at: null,
     consecutive_failures: 0,
+    consecutive_jev_failures: 0,
     last_success_tick: null,
   });
 });

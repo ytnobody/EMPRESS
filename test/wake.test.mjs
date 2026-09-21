@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { tasksHash } from "../src/domain/wake.js";
-import { checkReadyTasks } from "../src/domain/readiness.js";
+import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../src/domain/readiness.js";
 
 function mkTasksDir(extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wake-"));
@@ -84,4 +84,38 @@ test("checkReadyTasks: Jev below threshold marks not-ready", async () => {
   const res = await checkReadyTasks(dir, config, [task], { _jevJudge: fakeJudge, _jevAvailable: () => ({ available: true }) });
   assert.equal(res[0].ready, false);
   assert.match(res[0].reasons.join(" "), /Jev 0\.30 < 0\.6/);
+});
+
+// Verifies: a Jev BATCH ERROR degrades to deterministic-only readiness (reasons tagged
+// visibly), i.e. ready is unchanged from the no-key case but no longer silent.
+test("checkReadyTasks: Jev batch error degrades to deterministic-ready, visibly", async () => {
+  const { dir } = mkTasksDir();
+  const task = { id: 9, title: "t", body: keepBody(9, "t") };
+  const fakeJudge = async (opts) => ({ ok: false, results: [], error: "network down" });
+  const config = { readiness: { use_jev: true, jev_threshold: 0.6 }, jev: {} };
+  const res = await checkReadyTasks(dir, config, [task], { _jevJudge: fakeJudge, _jevAvailable: () => ({ available: true }) });
+  assert.equal(res[0].ready, true); // deterministic said ready; Jev error must NOT flip it
+  assert.equal(res[0].jev, null); // no usable probability
+  assert.ok(res[0].reasons.includes(JEV_DEGRADED_REASON)); // degradation is visible
+});
+
+// Verifies: an unparseable-but-ok Jev answer (no noul) is treated like an error
+// (deterministic-only, visible marker) — no usable probability.
+test("checkReadyTasks: unparseable Jev answer degrades like a batch error", async () => {
+  const { dir } = mkTasksDir();
+  const task = { id: 10, title: "t", body: keepBody(10, "t") };
+  const fakeJudge = async (opts) => ({ ok: true, results: opts.states.map(() => ({ answer: { weird: 1 } })) });
+  const config = { readiness: { use_jev: true, jev_threshold: 0.6 }, jev: {} };
+  const res = await checkReadyTasks(dir, config, [task], { _jevJudge: fakeJudge, _jevAvailable: () => ({ available: true }) });
+  assert.equal(res[0].ready, true);
+  assert.equal(res[0].jev, null);
+  assert.ok(res[0].reasons.includes(JEV_DEGRADED_REASON));
+});
+
+// Verifies: consecutive-Jev-failure arithmetic is pure — increments on error, resets on success.
+test("nextJevFailures: increments while degraded, resets on recovery", () => {
+  assert.equal(nextJevFailures(true, 0), 1); // first Jev failure
+  assert.equal(nextJevFailures(true, 3), 4); // consecutive run continues
+  assert.equal(nextJevFailures(false, 3), 0); // success -> reset
+  assert.equal(nextJevFailures(false, undefined), 0); // never degraded
 });
