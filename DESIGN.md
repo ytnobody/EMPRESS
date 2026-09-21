@@ -101,11 +101,18 @@ in the role prompts, and in Jev — not in EMPRESS's own logic.
 
 **Two ways to run the Superintendent loop:**
 
-- **`empress run`** (recommended, unattended): a long-lived Node process owns a
-  ticker. Each tick it spawns one UTC `pi -p` Superintendent pass, waits for it,
-  then sleeps `loop_interval`. No overlapping passes. Checks
-  `.empress/superintendent-state.json`'s `status` field before each tick
-  (`running`/`paused`/`quit`).
+- **`empress run`** (recommended, unattended): a long-lived, **event-driven**
+  Node process. It is cost-shaped cheapest-first:
+  1. **zero-LLM fs poll** (`tasksHash`, `wake_interval`, default 60s) — a pass
+     is considered only when the task queue actually changed;
+  2. **preflight readiness** (deterministic + ONE Jev batch call) — the LLM is
+     spawned only when at least one task is READY (skips log `no ready work`);
+  3. **LLM pass** (`pi -p` Superintendent) for real work, plus an **idle
+     self-audit** pass on `audit_interval` (default 3600s; 0 = off) that runs
+     checks and files findings as tasks.
+  No LLM/Jev runs just because a clock ticked. Checks the
+  `.empress/superintendent-state.json` `status` field before each poll
+  (`running`/`paused`/`quit`). `--once` retains the legacy single-pass mode.
 - **`/empress` prompt template** (interactive): expands to "run one
   Superintendent cycle now" inside an existing pi session. Use this when you
   want to supervise the loop by hand.

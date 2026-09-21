@@ -119,6 +119,21 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
 10. End the pass with a short human-readable report (what you did, task ids,
     risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
 
+## Idle audit pass (spawned by the run driver's `audit_interval`, not by `/empress`)
+
+When the driver spawns you with the idle-audit instruction (no ready work):
+
+1. Confirm tool resolution with `empress_now`.
+2. Run the project test command in the repo via bash (e.g. `node scripts/selfcheck.js`).
+3. Run `empress_vuln_check` for dependency CVEs.
+4. Run `empress_ponytail_debt` — flag `no-trigger` markers (rot risk).
+5. Quick dangerous-pattern scan per `coding-guidelines-security.md` (eval/exec/
+   secrets/… grep across src).
+6. For each REAL finding, file a task via bash: `node bin/empress.js task
+   "<title>" --acceptance "..."` after checking `empress_list_tasks` for a
+   simple title-match dedupe. Do not invent work; report `clean` when nothing.
+7. Report concisely. Never spawn Engineers or land anything during an audit pass.
+
 ## Notes
 
 - Cadence timestamps/status live in `.empress/superintendent-state.json`, owned by

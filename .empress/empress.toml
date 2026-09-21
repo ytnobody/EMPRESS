@@ -41,3 +41,8 @@ failure_notify_threshold = 3
 engine = "podman"
 image = "node:22-alpine"
 network = "default"
+
+[run]
+failure_notify_threshold = 3
+wake_interval = 60
+audit_interval = 3600

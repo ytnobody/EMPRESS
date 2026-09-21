@@ -1,6 +1,6 @@
 // Task readiness: deterministic guards (length, acceptance-criteria section) plus
 // an optional Jev `noul` judgment on whether the task is implementable as written.
-import { jevOne, jevAvailable } from "./jev.js";
+import { jevOne, jevJudge, jevAvailable } from "./jev.js";
 
 function nonWhitespaceLen(s) {
   return (s || "").replace(/\s/g, "").length;
@@ -62,4 +62,54 @@ export async function checkReadiness(cwd, config, task) {
   }
 
   return result;
+}
+
+/**
+ * Batch readiness: deterministic checks for ALL tasks, then ONE Jev batch call
+ * for the deterministic-ready remainder. Used by the run driver's wake preflight
+ * (LLM not spawned unless at least one task is ready). Jev count = 1 call for
+ * the whole batch. `_jevJudge` is injectable for tests.
+ * @returns {Promise<Array<{task:object, ready:boolean, reasons:string[], jev:object|null}>>}
+ */
+export async function checkReadyTasks(cwd, config, tasks, { _jevJudge } = {}) {
+  const ready = config.readiness || {};
+  const results = [];
+  const needJev = [];
+
+  for (const t of tasks) {
+    const det = deterministicReadiness(t, ready);
+    if (!det.ready) {
+      results.push({ task: t, ready: false, reasons: det.reasons, jev: null });
+      continue;
+    }
+    if (!(ready.use_jev && jevAvailable().available)) {
+      results.push({ task: t, ready: true, reasons: det.reasons, jev: null });
+      continue;
+    }
+    needJev.push({ t, det });
+  }
+
+  if (needJev.length) {
+    const judge = _jevJudge ?? jevJudge;
+    const r = await judge({
+      type: "noul",
+      instructions: "This task description is ready to be implemented by an autonomous engineer: it states a clear purpose, scope, and acceptance criteria.",
+      states: needJev.map((x) => x.t.body),
+      model: (config.jev && config.jev.model) || "jev-latest",
+    });
+    needJev.forEach(({ t, det }, i) => {
+      const raw = r.ok ? r.results[i]?.answer : null;
+      const prob = raw && typeof raw.noul === "number" ? raw.noul : null;
+      const threshold = ready.jev_threshold ?? 0.6;
+      const pass = prob === null ? true : prob >= threshold; // Jev error is not fail-closed here (deterministic already said ready); LLM pass re-checks.
+      results.push({
+        task: t,
+        ready: pass,
+        reasons: pass ? det.reasons : [...det.reasons, `Jev ${prob.toFixed(2)} < ${threshold}`],
+        jev: prob === null ? null : { probability: prob },
+      });
+    });
+  }
+
+  return results;
 }

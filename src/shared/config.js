@@ -48,6 +48,8 @@ export const DEFAULTS = {
   },
   run: {
     failure_notify_threshold: 3,
+    wake_interval: 60,     // fs-poll cadence (seconds); zero-LLM — event detection only
+    audit_interval: 3600,  // idle self-audit LLM cadence (seconds); 0 = disabled
   },
 };
 

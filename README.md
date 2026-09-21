@@ -109,7 +109,7 @@ with a review comment, never auto-merged.
 ```
 empress task "<title>" [flags]     Create a task
 empress list [--all]               List tasks
-empress run [--once] [--model M]   Superintendent tick loop / single pass
+empress run [--once] [--model M]   Event-driven loop / single pass
 empress pause | resume | quit | status   Control autonomous operation
 empress doctor                     Check prerequisites
 empress version                    Print version
@@ -117,10 +117,16 @@ empress version                    Print version
 
 Long unattended runs: put `empress run` under systemd (user service) or tmux.
 
+**Cost model.** `empress run` is event-driven, cheapest-first: a zero-LLM fs
+poll (60s) wakes only when the task queue changes; a preflight readiness check
+(deterministic + ONE Jev batch call) spawns the LLM only when a task is actually
+ready; an idle self-audit LLM runs on `[run] audit_interval` (3600s, 0 = off)
+and files findings as tasks. An idle queue costs ~zero.
+
 ## How it works
 
 ```
-empress run (Node driver, tick loop)
+empress run (Node driver, event-driven: fs-wake + Jev preflight + idle audit)
    └─ spawn  pi -p -e empress.ts --append-system-prompt superintendent.md
           Superintendent (coordinator) uses empress_* tools:
             list / readiness / assign / create_worktree / spawn_engineers
@@ -176,8 +182,8 @@ else (deterministic hit, degraded, Jev error, HIGH) gets the full LLM review.
 
 - **`empress doctor` shows ⚠ for TYPESAFE_API_KEY** — unset. Jev judgments are
   disabled and it falls back to deterministic rules (optional).
-- **`empress run` prints "Idle pass"** — no open tasks; create one with
-  `empress task`.
+- **`empress run` sits idle** — with an empty or not-ready queue it logs
+  `skip (zero LLM)` and costs ~nothing; create a task with `empress task`.
 - **A refactor of the harness itself is always HIGH** — control-plane paths
   (`high_paths` in `empress.toml`) are never auto-merged, by design. Approve and
   land manually (`git merge --no-ff <branch>`).
