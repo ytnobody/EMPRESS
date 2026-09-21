@@ -8,7 +8,27 @@ import { parseFrontmatterBlock } from "./frontmatter.ts";
 export const CONFIG_FILENAME = "empress.toml";
 export const EMPRESS_DIR = ".empress";
 
-export const DEFAULTS = {
+export interface Config {
+  project: { base_branch: string; test_command: string; language: string };
+  agent: { max_engineers: number; loop_interval: number; branch_prefix: string };
+  risk: {
+    use_jev: boolean;
+    high_paths: string[];
+    medium_paths: string[];
+    high_file_threshold: number;
+    high_line_threshold: number;
+    medium_file_threshold: number;
+    medium_line_threshold: number;
+    require_human_approval: boolean;
+  };
+  readiness: { use_jev: boolean; min_body_length: number; skip_acceptance_criteria_check: boolean };
+  jev: { model: string };
+  ci: { engine: string; image: string; network: string };
+  notification: { webhook_url: string; type: string };
+  run: { failure_notify_threshold: number; wake_interval: number; audit_interval: number };
+}
+
+export const DEFAULTS: Config = {
   project: {
     base_branch: "main",
     test_command: "",
@@ -54,15 +74,18 @@ export const DEFAULTS = {
 };
 
 /** Parse a small TOML-ish document: `key = value` or `key: value`, `[section]` tables, `#` comments. */
-export function parseToml(text) {
-  const root = {};
-  let section = root;
+export function parseToml(text: string): Record<string, unknown> {
+  const root: Record<string, unknown> = {};
+  let section: Record<string, unknown> = root;
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
     if (line.startsWith("[") && line.endsWith("]")) {
       const name = line.slice(1, -1).trim();
-      section = root[name] || (root[name] = {});
+      if (typeof root[name] !== "object" || root[name] === null) {
+        root[name] = {};
+      }
+      section = root[name] as Record<string, unknown>;
       continue;
     }
     const idx = line.indexOf("=");
@@ -73,22 +96,23 @@ export function parseToml(text) {
   return root;
 }
 
-export function loadTomlFile(p) {
+export function loadTomlFile(p: string): Record<string, unknown> {
   if (!fs.existsSync(p)) return {};
   return parseToml(fs.readFileSync(p, "utf-8"));
 }
 
 /** Deep-merge nested config over defaults. */
-export function mergeConfig(base, over) {
-  const out = { ...base };
+export function mergeConfig<T extends object>(base: T, over: Record<string, unknown>): T {
+  const out: Record<string, unknown> = { ...base } as Record<string, unknown>;
   for (const [k, v] of Object.entries(over || {})) {
-    if (v && typeof v === "object" && !Array.isArray(v) && base[k] && typeof base[k] === "object") {
-      out[k] = mergeConfig(base[k], v);
+    const bk = (base as Record<string, unknown>)[k];
+    if (v && typeof v === "object" && !Array.isArray(v) && bk && typeof bk === "object" && !Array.isArray(bk)) {
+      out[k] = mergeConfig(bk as Record<string, unknown>, v as Record<string, unknown>);
     } else {
       out[k] = v;
     }
   }
-  return out;
+  return out as T;
 }
 
 /**
@@ -97,7 +121,7 @@ export function mergeConfig(base, over) {
  * a git worktree (`.empress/worktrees/N`) find the main repo's task store + config
  * instead of a worktree-local one.
  */
-export function resolveProjectRoot(start = process.cwd()) {
+export function resolveProjectRoot(start: string = process.cwd()): string {
   let dir = path.resolve(start);
   while (true) {
     if (fs.existsSync(path.join(dir, EMPRESS_DIR, CONFIG_FILENAME))) {
@@ -114,12 +138,14 @@ export function resolveProjectRoot(start = process.cwd()) {
   }
 }
 
+export type LoadedConfig = Config & { file: string | null; cwd: string };
+
 /**
  * Load config for a project. Resolves the project root (walking up to the
  * nearest `.empress/empress.toml` / `empress.toml`) so worktree-invoked tools
  * share the main config. Returns full merged config with defaults.
  */
-export function loadConfig(cwd = process.cwd()) {
+export function loadConfig(cwd: string = process.cwd()): LoadedConfig {
   const root = resolveProjectRoot(cwd);
   let file = "";
   for (const candidate of [

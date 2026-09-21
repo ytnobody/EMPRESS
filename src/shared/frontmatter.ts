@@ -2,14 +2,16 @@
 // Deliberately dependency-free. Handles the subset we emit/consume.
 import * as fs from "node:fs";
 
+export type Frontmatter = Record<string, unknown>;
+
 /**
  * Parse a compact block of `key: value` frontmatter into a plain object.
  * Supports strings (bare or quoted), numbers, booleans, null, and simple
  * arrays (`[a, b]` / `["a", "b"]`), plus nested one-line `key: { ... }`.
  * Sections / long-form YAML are NOT supported — keep values on one line.
  */
-export function parseFrontmatterBlock(raw) {
-  const out = {};
+export function parseFrontmatterBlock(raw: string): Frontmatter {
+  const out: Frontmatter = {};
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
@@ -22,7 +24,7 @@ export function parseFrontmatterBlock(raw) {
   return out;
 }
 
-function findColon(s) {
+function findColon(s: string): number {
   let inStr = false;
   let quote = "";
   for (let i = 0; i < s.length; i++) {
@@ -39,7 +41,7 @@ function findColon(s) {
   return -1;
 }
 
-function coerce(value) {
+function coerce(value: string): unknown {
   // JSON-parseable (objects or arrays) parse as-is — needed for comment objects.
   const t = value.trim();
   if (t.startsWith("{") || t.startsWith("[")) {
@@ -53,7 +55,7 @@ function coerce(value) {
     const inner = value.slice(1, -1).trim();
     if (!inner) return [];
     // split on commas not inside quotes
-    const items = [];
+    const items: string[] = [];
     let cur = "";
     let inStr = false;
     let quote = "";
@@ -86,7 +88,7 @@ function coerce(value) {
 }
 
 /** Serialize a value to the compact frontmatter subset. */
-export function serializeScalar(value) {
+export function serializeScalar(value: unknown): string {
   if (value === null || value === undefined) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return String(value);
@@ -103,7 +105,7 @@ export function serializeScalar(value) {
  * Parse a full markdown file that begins with `---\n...\n---`.
  * Returns { frontmatter, body }. If no frontmatter, returns {} and full text.
  */
-export function parseMdFile(text) {
+export function parseMdFile(text: string): { frontmatter: Frontmatter; body: string } {
   if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) {
     return { frontmatter: {}, body: text };
   }
@@ -114,7 +116,7 @@ export function parseMdFile(text) {
   return { frontmatter: parseFrontmatterBlock(fm), body };
 }
 
-export function serializeMdFile(frontmatter, body) {
+export function serializeMdFile(frontmatter: Frontmatter, body: string): string {
   const lines = ["---"];
   for (const [k, v] of Object.entries(frontmatter)) {
     lines.push(`${k}: ${serializeScalar(v)}`);
@@ -124,11 +126,11 @@ export function serializeMdFile(frontmatter, body) {
 }
 
 /** Read + parse a markdown file with frontmatter. Throws if missing. */
-export function readMd(path) {
+export function readMd(path: string): { frontmatter: Frontmatter; body: string } {
   const text = fs.readFileSync(path, "utf-8");
   return parseMdFile(text);
 }
 
-export function writeMd(path, frontmatter, body) {
+export function writeMd(path: string, frontmatter: Frontmatter, body: string): void {
   fs.writeFileSync(path, serializeMdFile(frontmatter, body));
 }
