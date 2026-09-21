@@ -40,6 +40,15 @@ function findColon(s) {
 }
 
 function coerce(value) {
+  // JSON-parseable (objects or arrays) parse as-is — needed for comment objects.
+  const t = value.trim();
+  if (t.startsWith("{") || t.startsWith("[")) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      /* fall through to the scalar path below */
+    }
+  }
   if (value.startsWith("[") && value.endsWith("]")) {
     const inner = value.slice(1, -1).trim();
     if (!inner) return [];
@@ -82,7 +91,7 @@ export function serializeScalar(value) {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return String(value);
   if (Array.isArray(value)) {
-    return "[" + value.map((it) => JSON.stringify(String(it))).join(", ") + "]";
+    return JSON.stringify(value);
   }
   if (typeof value === "object") {
     return JSON.stringify(value);

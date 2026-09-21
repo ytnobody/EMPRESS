@@ -140,7 +140,7 @@ export function updateTask(cwd, id, patch = {}, newBody) {
   if (!file) return null;
   const cur = parseMdFile(fs.readFileSync(file, "utf-8"));
   const fm = { ...cur.frontmatter };
-  for (const k of ["title", "status", "assignee", "labels", "needs_clarification", "branch"]) {
+  for (const k of ["title", "status", "assignee", "labels", "needs_clarification", "branch", "comments"]) {
     if (k in patch) fm[k] = patch[k];
   }
   writeMd(file, fm, newBody ?? cur.body);
