@@ -3,21 +3,20 @@
 **Engineered Multi-Project Process & Review Execution System** — a
 fully-automatic development harness built **on [pi]**.
 
-EMPRESS is the pi-native successor to [HERMIT](../HERMIT), with two deliberate
-removals and one addition:
+EMPRESS is a fully-automatic development harness with three shaping decisions:
 
-- **No GitHub.** Tasks live as local files (`.empress/tasks/*.md`); merges happen
-  on local git branches. Fully usable offline / self-hosted.
-- **No Claude Code.** The Superintendent/Engineer loop is driven by pi
-  (non-interactive `pi -p`), from a small Node driver or a `/empress` prompt.
-- **Jev.** Gate judgments (readiness, risk, lessons) are delegated to TypeSafe's
-  [Jev](https://typesafe.ai) (System One) via a **native HTTPS call** — with
-  graceful fallback to rules if no `TYPESAFE_API_KEY` is set.
+- **Local-first.** Tasks live as local files (`.empress/tasks/*.md`); merges happen
+  on local git branches. No remote issue tracker, no remote PR — fully usable
+  offline / self-hosted.
+- **pi-driven.** The Superintendent/Engineer loop is driven by pi
+  (non-interactive `pi -p`), from a small driver process or a `/empress` prompt.
+- **Jev judgments.** Gate judgments (readiness, risk, review triage are delegated
+  to TypeSafe's [Jev](https://typesafe.ai) (System One) via a **native HTTPS
+  call** — with graceful fallback to rules if no `TYPESAFE_API_KEY` is set.
 
 > **"pi is the star. EMPRESS is the toolbox for local + judgment operations."**
 
-See **[DESIGN.md](DESIGN.md)** for the full architecture and the
-HERMIT→EMPRESS mapping.
+See **[DESIGN.md](DESIGN.md)** for the full architecture.
 
 ---
 
