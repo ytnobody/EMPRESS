@@ -2,7 +2,8 @@
 
 **EMPRESS** (Engineered Multi-Project Process & Review Execution System) is a
 fully-automatic development harness built **on pi**. It is the spiritual
-successor to [HERMIT](../HERMIT) with two deliberate removals and one addition:
+successor to [HERMIT](https://github.com/ytnobody/HERMIT) with two deliberate
+removals and one addition:
 
 1. **No GitHub dependency.** Task intake, assignment, review, merge, and lessons
    all happen on the local filesystem + local git. There is no remote issue
@@ -12,11 +13,11 @@ successor to [HERMIT](../HERMIT) with two deliberate removals and one addition:
    small Node driver process (`empress run`), or interactively via a `/empress`
    prompt template. No MCP registration, no `~/.claude/settings.json`, no
    machinery that only Claude Code understands.
-3. **Jev integration.** Judgments that HERMIT made with its own LLM or with
-   hand-written rules (readiness, risk, lesson scoring) are delegated to
-   [TypeSafe's Jev](https://typesafe.ai) (System One), surfaced through the
-   existing [CHARIOT](../CHARIOT) CLI, so the harness can use a cheap,
-   deterministic, single-pass judgment model for gate decisions.
+3. **Jev integration.** Judgments (readiness, risk, lesson scoring) are delegated
+   to [TypeSafe's Jev](https://typesafe.ai) (System One) via a **native HTTPS
+   call** (`src/domain/jev.ts`, `fetch`-based) — no separate CLI — so the
+   harness can use a cheap, deterministic, single-pass judgment model for gate
+   decisions, with fallback to rules when `TYPESAFE_API_KEY` is unset.
 
 ---
 
