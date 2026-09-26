@@ -143,26 +143,44 @@ function slugify(s: string): string {
   );
 }
 
-/** Build the human markdown body for a task (Purpose / Scope / Acceptance / Non-Goals). */
+/**
+ * Build the human markdown body for a task (Purpose / Scope / Acceptance / Non-Goals).
+ * Purpose and Scope are always filled: when the caller omits them, they are derived
+ * from the title (and acceptance) so an auto-filed task never reads as a bare
+ * "_to be filled_" placeholders — that placeholder was the root cause of the
+ * readiness/gate flagging idle-audit tasks as needs_clarification (Jev sees an
+ * unreadable spec). If a task genuinely needs human specification, the Jev noul
+ * can still flag it; but a coherent stub is a much better default to start from.
+ */
 export function buildMarkdown(input: TaskInput): string {
+  const title = input.title && input.title.trim() ? input.title.trim() : "Untitled task";
+  const ac = input.acceptance && input.acceptance.filter((a) => a && a.trim()).map((a) => a.trim());
+  const purpose =
+    input.purpose && input.purpose.trim()
+      ? input.purpose.trim()
+      : `The harness should address: \"${title}\"${
+          ac && ac.length ? ` so the acceptance criteria below are met` : ""
+        }.`;
+  const scope =
+    input.scope && input.scope.trim()
+      ? input.scope.trim()
+      : `Covers only the change needed to satisfy the acceptance criteria for \"${title}\".`;
+  const acceptance = ac && ac.length ? ac : ["_to be filled_"];
+  const nongoals = input.nongoals && input.nongoals.filter((n) => n && n.trim()).map((n) => n.trim());
   return [
-    `# ${input.title}`,
+    `# ${title}`,
     "",
     "## Purpose",
-    input.purpose || "_to be filled_",
+    purpose,
     "",
     "## Scope",
-    input.scope || "_to be filled_",
+    scope,
     "",
     "## Acceptance Criteria",
-    ...(input.acceptance && input.acceptance.length
-      ? input.acceptance.map((a) => `- [ ] ${a}`)
-      : ["- [ ] _to be filled_"]),
+    ...acceptance.map((a) => `- [ ] ${a}`),
     "",
     "## Non-Goals",
-    ...(input.nongoals && input.nongoals.length
-      ? input.nongoals.map((n) => `- ${n}`)
-      : ["- _none yet_"]),
+    ...(nongoals && nongoals.length ? nongoals.map((n) => `- ${n}`) : ["- _none yet_"]),
     "",
   ].join("\n");
 }

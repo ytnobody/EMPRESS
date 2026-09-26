@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, stripMetadata, getTaskStore } from "../src/domain/taskstore.js";
+import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore } from "../src/domain/taskstore.js";
 import { addComment, updateTask, getTask, closeTask, listTasks, removeTask } from "../src/domain/tasks.js";
 import { DEFAULTS } from "../src/shared/config.js";
 
@@ -110,6 +110,19 @@ test("taskstore: buildGhBody / stripMetadata are inverse for branch+pr", () => {
   assert.equal(stripMetadata(full), "hello body");
   assert.ok(full.includes("<!--empress:branch=empress/task-1-->"));
   assert.ok(full.includes("<!--empress:pr=7-->"));
+});
+
+test("taskstore: buildMarkdown derives Purpose/Scope from title when omitted (no _to be filled_ stubs)", () => {
+  const body = buildMarkdown({ title: "Prune stale merged local branches", acceptance: ["git branch shows no test-90xx"] });
+  assert.ok(body.includes("## Purpose"));
+  assert.ok(!/Purpose\n_to be filled_/.test(body), "Purpose must not be a bare placeholder");
+  assert.ok(!/Scope\n_to be filled_/.test(body), "Scope must not be a bare placeholder");
+  assert.ok(body.includes("Prune stale merged local branches"));
+  assert.ok(body.includes("git branch shows no test-90xx"));
+  // explicit purpose/scope preserved verbatim
+  const explicit = buildMarkdown({ title: "X", purpose: "explicit purpose", scope: "explicit scope" });
+  assert.ok(explicit.includes("explicit purpose"));
+  assert.ok(explicit.includes("explicit scope"));
 });
 
 // ---------------------------------------------------------------------------
