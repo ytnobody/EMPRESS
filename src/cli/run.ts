@@ -64,10 +64,28 @@ function runPass({ cwd, config, model, thinking, audit = false }: RunPassOptions
     const proc = spawn("pi", args, { cwd, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let err = "";
+    // Stall guard: a Superintendent/Engineer pass must not hang the loop forever.
+    // If the child hasn't exited within pass_timeout we SIGKILL it and resolve as
+    // a failed (stalled) pass; the loop's next wake then retries the queue.
+    const timeoutMs = Math.max(1, Number(config.run?.pass_timeout ?? 1800)) * 1000;
+    const timer = setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      resolve({ code: -1, out, err: `${err}\n[empress] pass stalled: no exit within ${timeoutMs / 1000}s — killed; loop continues on next wake.` });
+    }, timeoutMs);
     proc.stdout.on("data", (d) => (out += d.toString()));
     proc.stderr.on("data", (d) => (err += d.toString()));
-    proc.on("close", (code) => resolve({ code: code ?? -1, out, err }));
-    proc.on("error", (e) => resolve({ code: -1, out, err: String(e.message) }));
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code: code ?? -1, out, err });
+    });
+    proc.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ code: -1, out, err: String(e.message) });
+    });
   });
 }
 
