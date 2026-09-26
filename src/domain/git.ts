@@ -173,6 +173,67 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
 }
 
 /**
+ * Pure decision for pruning stale merged REMOTE-tracking branches: given each
+ * ref's short name + already-computed merge status, decide which to delete and
+ * which to skip. Only refs that are merged AND not protected are pruned.
+ * Protected = base / main / develop / the remote symbolic HEAD / any `keep` name;
+ * unmerged refs are never pruned regardless of name. (Command-verification target
+ * for the executor below — no git state consulted.)
+ */
+export function decideRemotePrunes(refs: Array<{ short: string; merged: boolean }>, base: string, keep: string[]): { prune: string[]; skip: string[] } {
+  const keepSet = new Set<string>([...keep, "main", "develop", base, "HEAD"]);
+  const prune: string[] = [];
+  const skip: string[] = [];
+  for (const { short, merged } of refs) {
+    if (!short || keepSet.has(short) || !merged) {
+      skip.push(short);
+      continue;
+    }
+    prune.push(short);
+  }
+  return { prune, skip };
+}
+
+/**
+ * Delete PR-dead-weight on a remote: fully-merged remote-tracking branches
+ * (`git push <remote> :<short>`, then drop the local ref). Local-only repos with
+ * no pushable remote are no-ops. Fail-safe: any merge-gate failure or failed push
+ * leaves the branch in place (skipped) rather than risking a live branch. This is
+ * what lets the harness sweep merged remote branches too, not just local ones.
+ */
+export function pruneStaleMergedRemoteBranches(cwd: string, base: string, opts: { keep?: string[]; remote?: string } = {}): BranchPruneResult {
+  const remote = opts.remote || "origin";
+  const keep = opts.keep || [];
+  const refs = (git(cwd, "for-each-ref", "--format=%(refname:short)", `refs/remotes/${remote}/`) || "")
+    .split("\n")
+    .filter(Boolean)
+    .map((ref) => {
+      const short = ref.slice(remote.length + 1);
+      const merged = run("git", ["-C", cwd, "merge-base", "--is-ancestor", ref, base]).code === 0;
+      return { short, merged };
+    });
+  const { prune, skip } = decideRemotePrunes(refs, base, keep);
+  const pruned: string[] = [];
+  const skipped = [...skip];
+  for (const short of prune) {
+    // fail-safe: re-verify still an ancestor immediately before destroying
+    const stillMerged = run("git", ["-C", cwd, "merge-base", "--is-ancestor", `refs/remotes/${remote}/${short}`, base]).code === 0;
+    if (!stillMerged) {
+      skipped.push(short);
+      continue;
+    }
+    const del = run("git", ["-C", cwd, "push", remote, `:${short}`]);
+    if (del.code === 0) {
+      pruned.push(short);
+      run("git", ["-C", cwd, "branch", "-d", "-r", `${remote}/${short}`]);
+    } else {
+      skipped.push(short); // failed push => keep, never force
+    }
+  }
+  return { pruned, skipped };
+}
+
+/**
  * Pure decision for landBranch: whether to emit an update-fast-forward against
  * origin/<base>. Returns a Command or null (no-op). Guards the origin path so a
  * doomed `git merge --ff-only origin/<base>` is never run when that ref is absent

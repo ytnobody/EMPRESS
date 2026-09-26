@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pruneStaleMergedBranches } from "../src/domain/git.js";
+import { pruneStaleMergedBranches, decideRemotePrunes } from "../src/domain/git.js";
 
 function gitAvailable() {
   try {
@@ -75,4 +75,31 @@ test("pruneStaleMergedBranches: deletes merged, keeps unmerged + protected", (t)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Verifies: a remote-tracking ref that is FULLY merged into base and not protected
+// is the only thing pruned — the deletion candidates are decided from merge status
+// (spec) + protected-name gate, independent of any push/git state.
+test("decideRemotePrunes: prunes merged+unprotected, keeps unmerged/protected/HEAD", () => {
+  const refs = [
+    { short: "empress/task-3", merged: true },
+    { short: "empress/task-4", merged: true },
+    { short: "empress/task-10", merged: false }, // held, unmerged
+    { short: "develop", merged: true },           // base branch
+    { short: "main", merged: true },
+    { short: "HEAD", merged: true },              // symbolic default ref
+  ];
+  const res = decideRemotePrunes(refs, "develop", []);
+  assert.deepEqual(res.prune.sort(), ["empress/task-3", "empress/task-4"]);
+  const kept = new Set(res.skip);
+  assert.ok(kept.has("empress/task-10"), "unmerged held branch never pruned");
+  assert.ok(kept.has("develop") && kept.has("main") && kept.has("HEAD"), "protected/HEAD always kept");
+});
+
+// Verifies: a merged branch protected via `keep` is exempted even though it is
+// fully merged — the protected-name gate dominates the merge gate.
+test("decideRemotePrunes: keep-list protects merged branches from pruning", () => {
+  const res = decideRemotePrunes([{ short: "empress/task-1", merged: true }], "develop", ["empress/task-1"]);
+  assert.deepEqual(res.prune, []);
+  assert.deepEqual(res.skip, ["empress/task-1"]);
 });

@@ -26,6 +26,7 @@ import {
   landBranch,
   isGitRepo,
   pruneStaleMergedBranches,
+  pruneStaleMergedRemoteBranches,
 } from "../domain/git.ts";
 import { runProjectCi } from "../domain/ci.ts";
 import { runVulnCheck } from "../domain/vuln.ts";
@@ -479,6 +480,11 @@ export default function (pi: ExtensionAPI) {
       const pr = pruneStaleMergedBranches(cwd, base);
       if (pr.pruned.length) lines.push("", `Pruned ${pr.pruned.length} stale merged local branch(es): ${pr.pruned.join(", ")}`);
       if (pr.skipped.length) lines.push("", `Kept branch(es) (not fully merged or in use): ${pr.skipped.join(", ")}`);
+      // Also sweep merged REMOTE tracking branches (dead weight left by merged
+      // PRs) — protected/unmerged/HEAD are untouched (see decideRemotePrunes).
+      const prr = pruneStaleMergedRemoteBranches(cwd, base);
+      if (prr.pruned.length) lines.push("", `Pruned ${prr.pruned.length} stale merged remote branch(es): ${prr.pruned.join(", ")}`);
+      if (prr.skipped.length) lines.push("", `Kept remote branch(es) (not fully merged or protected): ${prr.skipped.join(", ")}`);
       return { content: [{ type: "text", text: lines.join("\n") }], details: { axisCounts: r.summary } };
     },
   });
