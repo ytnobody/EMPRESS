@@ -21,6 +21,7 @@ export interface Task {
   labels: string[];
   needs_clarification: boolean;
   branch: string;
+  pr: string;
   created: string;
   comments: TaskComment[];
   body: string;
@@ -45,6 +46,7 @@ export function readTaskFile(file: string): Task {
     labels: (frontmatter.labels as string[] | undefined) ?? [],
     needs_clarification: Boolean(frontmatter.needs_clarification),
     branch: String(frontmatter.branch ?? ""),
+    pr: String(frontmatter.pr ?? ""),
     created: String(frontmatter.created ?? ""),
     comments: Array.isArray(frontmatter.comments)
       ? (frontmatter.comments as TaskComment[])
@@ -168,6 +170,7 @@ export function createTask(
     labels: labels || [],
     needs_clarification: false,
     branch: "",
+    pr: "",
     created: new Date().toISOString(),
     comments: [] as TaskComment[],
   };
@@ -193,6 +196,7 @@ export function updateTask(
     "labels",
     "needs_clarification",
     "branch",
+    "pr",
     "comments",
   ] as const;
   for (const k of keys) {
@@ -229,6 +233,7 @@ export function taskBrief(t: Task): string {
     `Task #${t.id}: ${t.title}`,
     `Status: ${t.status}`,
     t.branch ? `Branch/worktree: ${t.branch}` : "",
+    t.pr ? `PR: ${t.pr}` : "",
     "",
     t.body,
     "",

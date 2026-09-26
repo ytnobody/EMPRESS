@@ -1,5 +1,6 @@
 # EMPRESS project config. Shared with the team.
-# No GitHub, no Claude Code. Everything runs on local git + local task files.
+# Local-first by default: tasks live as local files, merges happen on local git.
+# GitHub integration (gh) is strictly opt-in via [github] below.
 
 [project]
 base_branch = "main"
@@ -10,6 +11,13 @@ language = "en"
 max_engineers = 2
 loop_interval = 120
 branch_prefix = "empress/task"
+
+# Per-role model overrides. Empty (default) = use pi's default model.
+# superintendent: the coordinator pass (empress run). engineer: spawned subagents.
+# The CLI flag `empress run --model` still wins over this config.
+[models]
+superintendent = ""
+engineer = ""
 
 # Jev (System One, via the chariot CLI) drives judgments.
 # Set TYPESAFE_API_KEY in your environment. If unset, EMPRESS falls back to rules.
@@ -46,3 +54,14 @@ network = "default"
 failure_notify_threshold = 3
 wake_interval = 60
 audit_interval = 1800
+
+# GitHub integration via the gh CLI — DISABLED (local-only default).
+# Set enabled = true + owner/repo (or an origin remote) to push landed task
+# branches and open PRs; e.g. for self-hosting this repo on GitHub:
+#   enabled = true
+#   owner = "yourname"
+#   repo = "EMPRESS"
+[github]
+enabled = false
+owner = ""
+repo = ""

@@ -183,6 +183,32 @@ else (deterministic hit, degraded, Jev error, HIGH) gets the full LLM review.
 └── worktrees/                # git worktrees — RUNTIME (git-ignored)
 ```
 
+## Configuration (`empress.toml`)
+
+`empress init` writes `.empress/empress.toml` with sane defaults. Two optional
+sections let you pin models per role and opt into GitHub:
+
+```toml
+# Per-role model overrides. Empty = pi's default model (whatever your pi
+# session runs with). Set a model id/pattern to pin a role to a specific model.
+# Example: superintendent = "anthropic/claude-sonnet-4-5"
+[models]
+superintendent = ""   # coordinator pass (empress run) — CLI --model still wins
+engineer = ""         # spawned Engineer subagents
+
+# GitHub integration via the gh CLI. OFF by default: EMPRESS is local-only
+# (never pushes, never opens PRs) unless you opt in here.
+[github]
+enabled = false
+owner = ""            # optional — resolved from origin remote or `gh repo view`
+repo = ""
+```
+
+When `[github] enabled = true`, landing a task pushes its branch to `origin`
+and opens a PR against `base_branch` (best-effort; local merge still happens if
+the PR step fails). You must have the `gh` CLI installed and authenticated, and
+the repo needs an `origin` remote (or explicit `owner`/`repo`).
+
 ## Troubleshooting
 
 - **`empress doctor` shows ⚠ for TYPESAFE_API_KEY** — unset. Jev judgments are

@@ -1,7 +1,7 @@
 // `empress doctor`: prerequisite / environment checks.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EMPRESS_DIR } from "../shared/config.ts";
+import { EMPRESS_DIR, loadConfig } from "../shared/config.ts";
 import { run } from "../shared/shell.ts";
 import { isGitRepo } from "../domain/git.ts";
 import { jevAvailable } from "../domain/jev.ts";
@@ -35,6 +35,15 @@ export async function doctor(cwd: string) {
   const piRes = run("pi", ["--version"]);
   checks.push(["pi available", piRes.code === 0, piRes.code === 0 ? "" : "pi not found"]);
 
+  // gh is only needed when the project opted into GitHub ([github] enabled = true).
+  const ghEnabled = Boolean(loadConfig(cwd).github?.enabled);
+  let ghOk = true;
+  if (ghEnabled) {
+    const ghRes = run("gh", ["--version"]);
+    ghOk = ghRes.code === 0;
+    checks.push(["gh CLI (github enabled)", ghOk, ghOk ? "" : "required because [github] enabled = true"]);
+  }
+
   let allOk = true;
   let warnOnly = 0;
   for (const [name, pass, msg] of checks) {
@@ -45,7 +54,7 @@ export async function doctor(cwd: string) {
     console.log(`${mark} ${name}${msg ? `\n    ${msg}` : ""}`);
   }
 
-  const env = ["GIT", jev.apiKey ? "JEV" : "", "PI"].filter(Boolean);
+  const env = ["GIT", jev.apiKey ? "JEV" : "", "PI", ghEnabled && ghOk ? "GH" : ""].filter(Boolean);
   console.log(`\nReady: ${env.join(", ")}`);
   if (!allOk) {
     console.log("Some checks failed. See notes above.");

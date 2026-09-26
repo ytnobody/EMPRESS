@@ -33,6 +33,7 @@ import { collectAuditFindings } from "../domain/audit.ts";
 import { evaluateRisk } from "../domain/risk.ts";
 import { checkReadiness } from "../domain/readiness.ts";
 import { getLessons, addLesson } from "../domain/lessons.ts";
+import { pushBranchAndCreatePr, ghAvailable } from "../domain/github.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -131,12 +132,12 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "empress_get_config",
     label: "Empress Get Config",
-    description: "Return the current EMPRESS configuration (base_branch, test_command, max_engineers, loop_interval, risk/readiness prefs).",
+    description: "Return the current EMPRESS configuration (base_branch, test_command, max_engineers, loop_interval, per-role models, github/gh flags, risk/readiness prefs).",
     parameters: Type.Object({}),
     async execute() {
       const c = cfg();
-      const { project, agent, risk, readiness, jev, ci } = c;
-      return reply(JSON.stringify({ project, agent, risk, readiness, jev, ci, file: c.file }));
+      const { project, agent, models, github, risk, readiness, jev, ci, run } = c;
+      return reply(JSON.stringify({ project, agent, models, github, risk, readiness, jev, ci, run, file: c.file }));
     },
   });
 
@@ -255,11 +256,13 @@ export default function (pi: ExtensionAPI) {
       const tasks = ids.map((id) => getTask(cwd, id)).filter((t): t is Task => t !== null);
       if (!tasks.length) return reply("no valid tasks to spawn");
 
+      // Engineer model: explicit tool arg wins; else [models] engineer; else pi default.
+      const engineerModel = params.model || (config.models && config.models.engineer) || undefined;
       onUpdate?.(reply(`Spawning ${tasks.length} Engineer(s)...`));
       const results = await mapLimit(tasks, cap, (t, i) => {
         const wt = path.join(cwd, ".empress", "worktrees", String(t.id));
         const worktreePath = fs.existsSync(wt) ? wt : undefined;
-        return spawnEngineer(cwd, t, worktreePath, { model: params.model, maxConcurrent: cap });
+        return spawnEngineer(cwd, t, worktreePath, { model: engineerModel, maxConcurrent: cap });
       });
       const summary = results.map((r) => `#${r.task}: exit=${r.code} ${r.code === 0 ? "ok" : "FAILED"}`).join("\n");
       return reply(`${summary}\n\n${results.map((r) => `#${r.task}\n${r.err ? "stderr: " + r.err + "\n" : ""}${r.report}`).join("\n\n")}`);
@@ -334,13 +337,77 @@ export default function (pi: ExtensionAPI) {
       }
 
       const base = config.project?.base_branch;
+      const replyBody: Record<string, unknown> = { branch: t.branch };
+
+      // When GitHub integration is enabled, open the remote PR BEFORE landing:
+      // the local branch deletion (removeWorktree) and the ff-merge both make the
+      // branch an ancestor of base, so a post-land push would open an empty PR.
+      const ghCfg = config.github || { enabled: false, owner: "", repo: "" };
+      if (ghCfg.enabled) {
+        const prRes = pushBranchAndCreatePr(
+          cwd,
+          {
+            base,
+            branch: t.branch,
+            title: `Task #${params.id}: ${t.title}`,
+            body: t.body,
+          },
+          ghCfg
+        );
+        if (prRes.ok && prRes.prUrl) {
+          updateTask(cwd, params.id, { pr: prRes.prUrl });
+          addComment(cwd, params.id, "empress", `PR opened: ${prRes.prUrl}`);
+          replyBody.prUrl = prRes.prUrl;
+        } else {
+          addComment(cwd, params.id, "empress", `PR step failed: ${prRes.error || "unknown"}`);
+          replyBody.prError = prRes.error || "PR creation failed";
+        }
+      }
+
       const res = landBranch(cwd, base, t.branch);
+      Object.assign(replyBody, res);
       if (res.merged) {
         closeTask(cwd, params.id, `Landed into ${base} (${res.note}).`);
         removeWorktree(cwd, params.id, t.branch);
         addLesson(cwd, `After landing task #${params.id}, the result was ${riskEval.level} risk — ${riskEval.reasons.join("; ") || "no concerns"}.`);
       }
-      return reply(JSON.stringify({ ...res, branch: t.branch }));
+      return reply(JSON.stringify(replyBody));
+    },
+  });
+
+  pi.registerTool({
+    name: "empress_push_pr",
+    label: "Empress Push PR",
+    description: "Push a task's branch to origin and open a GitHub PR into the base branch via the gh CLI. ONLY active when [github] enabled=true (default: disabled — in that case it returns 'disabled' and never touches gh or a remote).",
+    parameters: Type.Object({ id: Type.Number() }),
+    async execute(_id, params) {
+      const cwd = projectDir();
+      const config = cfg();
+      const ghCfg = config.github || { enabled: false, owner: "", repo: "" };
+      if (!ghCfg.enabled) {
+        return reply(JSON.stringify({ ok: false, reason: "github integration disabled ([github] enabled = false)" }));
+      }
+      if (!ghAvailable()) {
+        return reply(JSON.stringify({ ok: false, reason: "gh CLI not installed" }));
+      }
+      const t = getTask(cwd, params.id);
+      if (!t || !t.branch) return reply("task has no branch (create_worktree first)");
+      const base = config.project?.base_branch;
+      const res = pushBranchAndCreatePr(
+        cwd,
+        {
+          base,
+          branch: t.branch,
+          title: `Task #${params.id}: ${t.title}`,
+          body: t.body,
+        },
+        ghCfg
+      );
+      if (res.ok && res.prUrl) {
+        updateTask(cwd, params.id, { pr: res.prUrl });
+        addComment(cwd, params.id, "empress", `PR opened: ${res.prUrl}`);
+      }
+      return reply(JSON.stringify(res));
     },
   });
 

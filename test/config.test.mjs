@@ -58,3 +58,28 @@ test("config: resolveProjectRoot walks up to .empress/empress.toml marker", () =
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// Verifies: the [models] section parses into the per-role defaults and an
+// override keeps the other role's default (both default to "" = pi's model).
+test("config: [models] per-role overrides default to empty (pi default)", () => {
+  const parsed = parseToml("[models]\nsuperintendent = \"anthropic/claude-sonnet-4-5\"\nengineer = \"\"\n");
+  const merged = mergeConfig({ models: { superintendent: "", engineer: "" } }, parsed);
+  assert.deepEqual(merged.models, {
+    superintendent: "anthropic/claude-sonnet-4-5",
+    engineer: "",
+  });
+});
+
+// Verifies: [github] is disabled by default and only becomes active when the
+// config opts in — the whole merge keeps the other defaults intact.
+test("config: [github] integration is opt-in (disabled by default)", () => {
+  const merged = mergeConfig(
+    { github: { enabled: false, owner: "", repo: "" } },
+    parseToml("[github]\nenabled = true\nowner = \"acme\"\n")
+  );
+  assert.deepEqual(merged.github, { enabled: true, owner: "acme", repo: "" });
+  assert.equal(
+    mergeConfig({ github: { enabled: false, owner: "", repo: "" } }, parseToml("[github]\n")).github.enabled,
+    false
+  );
+});

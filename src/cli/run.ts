@@ -105,7 +105,13 @@ export async function runLoop(
   const wakeMs = Math.max(1, Number(config.run?.wake_interval ?? 60)) * 1000;
   const auditMs = Number(config.run?.audit_interval ?? 3600) * 1000;
   const auditEnabled = auditMs > 0;
-  console.log(`empress run: project=${cwd} wake=${wakeMs / 1000}s audit=${auditEnabled ? auditMs / 1000 + "s" : "off"}`);
+  // Superintendent model: explicit CLI --model wins; else [models] superintendent;
+  // else unset → pi's default model.
+  const superModel = model || (config.models && config.models.superintendent) || undefined;
+  console.log(
+    `empress run: project=${cwd} wake=${wakeMs / 1000}s audit=${auditEnabled ? auditMs / 1000 + "s" : "off"}` +
+      (superModel ? ` superintendent-model=${superModel}` : " superintendent-model=pi-default")
+  );
 
   let prevHash: string | null = null;
   let lastAuditAt = Date.now();
@@ -131,7 +137,7 @@ export async function runLoop(
       pass++;
       const started = new Date().toISOString();
       console.log(`\n--- pass ${pass} (${started}) ---`);
-      const res = await runPass({ cwd, config, model, thinking });
+      const res = await runPass({ cwd, config, model: superModel, thinking });
       await handleResult(cwd, res, started, pass, config);
       break;
     }
@@ -173,7 +179,7 @@ export async function runLoop(
           pass++;
           const started = new Date().toISOString();
           console.log(`\n--- pass ${pass} (${started}) ready: #${readyIds.join(", #")} ---`);
-          const res = await runPass({ cwd, config, model, thinking });
+          const res = await runPass({ cwd, config, model: superModel, thinking });
           await handleResult(cwd, res, started, pass, config);
         }
       }
@@ -184,7 +190,7 @@ export async function runLoop(
       pass++;
       const started = new Date().toISOString();
       console.log(`\n--- audit pass ${pass} (${started}) ---`);
-      const res = await runPass({ cwd, config, model, thinking, audit: true });
+      const res = await runPass({ cwd, config, model: superModel, thinking, audit: true });
       await handleResult(cwd, res, started, pass, config);
     }
 

@@ -108,16 +108,33 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
      Security categories) before any landing decision.
 9. Evaluate risk with `empress_evaluate_risk`:
    - LOW / MEDIUM: run `empress_land_task` so it merges the branch into the base
-     branch locally and cleans up the worktree.
+     branch locally and cleans up the worktree. If `[github] enabled = true`
+     (see `empress_get_config`), `empress_land_task` first pushes the branch and
+     opens a remote PR (best-effort; PR failure does not block the local merge).
    - HIGH: review the diff yourself (read the actual patch, not just the file list),
      then post a comment summarizing your findings and recommendation, and leave it
      for a human.
-10. Write any lesson worth remembering with `empress_add_lesson`.
+10. Write any lesson worth remembering with `empress_add_lesson`.   
+    When GitHub integration is on, a PR may need a manual review/merge note in
+    the lesson; keep it brief.
 11. End the pass with a short human-readable report (what you did, task ids,
     risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
 9. Write any lesson worth remembering with `empress_add_lesson`.
 10. End the pass with a short human-readable report (what you did, task ids,
     risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
+
+## Models & GitHub (config-driven, both optional)
+
+- **Role models.** `empress_get_config` shows `[models] superintendent` and
+  `[models] engineer`. Empty means the role runs on pi's default model (what the
+  caller launched). The run driver (`empress run`) applies `[models]
+  superintendent`; Engineers get `[models] engineer` unless a tool call passes an
+  explicit `model` override in `empress_spawn_engineers`.
+- **GitHub is opt-in.** `[github] enabled = false` (default) means EMPRESS stays
+  local-only: do not call `empress_push_pr` and do not expect PRs. When
+  `enabled = true`, `empress_land_task` opens a PR per landed task; you can also
+  use `empress_push_pr` directly on a task branch before landing. Never use gh or
+  push to a remote when the config says it is disabled.
 
 ## Idle audit pass (spawned by the run driver's `audit_interval`, not by `/empress`)
 

@@ -33,7 +33,8 @@ function prompt(question: string, def: string): Promise<string> {
 }
 
 const DEFAULT_TOML = (o: InitOpts) => `# EMPRESS project config. Shared with the team.
-# No GitHub, no Claude Code. Everything runs on local git + local task files.
+# Local-first by default: tasks live as local files, merges happen on local git.
+# GitHub integration (gh) is strictly opt-in via [github] below.
 
 [project]
 base_branch = "${o.base_branch}"
@@ -44,6 +45,24 @@ language = "${o.language}"
 max_engineers = ${o.max_engineers}
 loop_interval = ${o.loop_interval}
 branch_prefix = "empress/task"
+
+# Per-role model overrides. Empty (default) = use pi's default model
+# (the one your pi session runs with). Set an explicit model id/pattern to
+# pin a role to a specific model; e.g. superintendent = "anthropic/claude-sonnet-4-5".
+# For \`empress run\`, the CLI flag --model still wins over this config.
+[models]
+superintendent = ""
+engineer = ""
+
+# GitHub integration via the gh CLI. DISABLED by default: EMPRESS is
+# local-only unless you opt in here. When enabled, landed tasks push their
+# branch and open a PR to base_branch.
+# owner/repo may be left empty — EMPRESS resolves them from the origin
+# remote URL, or from \`gh repo view\` when authed.
+[github]
+enabled = false
+owner = ""
+repo = ""
 
 # Jev (System One) drives judgments natively via HTTPS (TYPESAFE_API_KEY).
 # If the key is unset, EMPRESS falls back to deterministic rules.

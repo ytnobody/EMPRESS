@@ -11,6 +11,11 @@ export const EMPRESS_DIR = ".empress";
 export interface Config {
   project: { base_branch: string; test_command: string; language: string };
   agent: { max_engineers: number; loop_interval: number; branch_prefix: string };
+  // Per-role model overrides. Empty string = use pi's default model (no --model).
+  models: { superintendent: string; engineer: string };
+  // GitHub integration via the gh CLI. Strictly opt-in: unless enabled=true,
+  // EMPRESS never touches gh or any git remote (local-only by default).
+  github: { enabled: boolean; owner: string; repo: string };
   risk: {
     use_jev: boolean;
     high_paths: string[];
@@ -38,6 +43,19 @@ export const DEFAULTS: Config = {
     max_engineers: 4,
     loop_interval: 120,
     branch_prefix: "empress/task",
+  },
+  // Empty = pi's default model. Set e.g. superintendent = "anthropic/claude-sonnet-4-5"
+  // or a provider/id pattern pi resolves; the CLI --model flag (empress run) wins
+  // over the config value for the Superintendent.
+  models: {
+    superintendent: "",
+    engineer: "",
+  },
+  // Disabled by default: github integration (gh) never runs unless enabled = true.
+  github: {
+    enabled: false,
+    owner: "",
+    repo: "",
   },
   risk: {
     use_jev: true,

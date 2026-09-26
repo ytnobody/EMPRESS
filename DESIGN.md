@@ -56,7 +56,7 @@ in the role prompts, and in Jev — not in EMPRESS's own logic.
 | GitHub PR | Local branch `empress/task-NNNN` |
 | `check_ci_status` | `empress_check_ci` → runs task's configured `test_command` and reports pass/fail |
 | `evaluate_risk` | `empress_evaluate_risk` — deterministic heuristics **+ Jev `score`** judgment on the diff |
-| `merge_pr` | `empress_land_task` — merges branch into configured base branch locally, cleans worktree |
+| `merge_pr` | `empress_land_task` — merges branch into configured base branch locally, cleans worktree; when `[github] enabled=true` it first pushes the branch and opens a PR via `empress_push_pr` (gh CLI) |
 | Issue/PR comments | Task frontmatter `comments[]` (local, appended via `empress_task_comment`) |
 | `close_issue` | `empress_close_task` (status `done`) |
 | `get_lessons` | `empress_get_lessons` → `.empress/lessons.md`, scored via Jev |
@@ -143,6 +143,7 @@ empress/
 │   │   ├── jev.ts             # native Jev client (fetch; pure request/parse)
 │   │   ├── tasks.ts           # local task store (.empress/tasks)
 │   │   ├── git.ts             # worktree/branch/merge/diff helpers
+│   │   ├── github.ts          # opt-in gh integration (resolveRepo, pushBranchAndCreatePr)
 │   │   ├── risk.ts            # deterministic + Jev risk evaluation
 │   │   ├── readiness.ts       # Jev-backed readiness check
 │   │   └── lessons.ts         # lesson scoring + store
@@ -212,6 +213,35 @@ marks it `needs_clarification: true` and posts a structured comment asking for
 **Purpose / Scope / Acceptance Criteria / Non-Goals**. A human edits the task
 file and sets `needs_clarification: false`; it re-enters the queue on the next
 cycle.
+
+### Role models & GitHub integration (optional config)
+
+Two optional sections in `empress.toml` stay **off by default** so a stock
+EMPRESS project runs purely on pi's default model and local git:
+
+```toml
+[models]
+superintendent = ""   # empty = pi's default model (no --model is passed)
+engineer = ""         # empty = pi's default model
+
+[github]
+enabled = false      # false = local-only, gh is never invoked
+owner = ""            # optional; resolved from origin remote or `gh repo view`
+repo = ""
+```
+
+- `[models]` pins a role to a specific pi model. For the Superintendent under
+  `empress run`, the explicit CLI flag `--model` still wins. For Engineers, an
+  explicit `model` argument to `empress_spawn_engineers` wins.
+- `[github]` flips on the gh (GitHub CLI) integration. When enabled, landing a
+  task first pushes its branch to origin and opens a PR against the base branch
+  (best-effort — a PR failure is recorded on the task but does not block the
+  local merge; the branch must diverge for the PR to be non-empty, so the push
+  happens *before* the local ff-merge). `src/domain/github.ts` owns the gh
+  surface: `resolveRepo` (config → origin remote → `gh repo view`) and
+  `pushBranchAndCreatePr`. The Superintendent can also call `empress_push_pr`
+  directly on a task branch. `[github]` is the *only* gate: when disabled,
+  EMPRESS never touches gh or a git remote.
 
 ---
 
