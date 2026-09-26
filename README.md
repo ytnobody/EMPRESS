@@ -81,6 +81,69 @@ empress init              # writes .empress/empress.toml + role prompts; asks ba
 > **After init**, the harness is just a config + role prompts. `agents/*` are
 > per-project instructions like CLAUDE.md — edit them freely.
 
+### Run the full EMPRESS loop (setup → resident)
+
+Once `empress` is callable (§2) and a project is configured (§3), stand up the
+**full autonomous loop** end-to-end:
+
+1. **Configure `.empress/empress.toml`.** `empress init` writes sane defaults; tune
+the loop before going live. The key fields:
+
+   ```toml
+   base_branch = "main"      # branch that task branches land onto
+   test_command = "bun scripts/selfcheck.ts"  # the "CI" gate run before a merge
+   max_engineers = 3         # parallel Engineers spawned per pass
+   loop_interval = 60        # idle-tick / wake cadence (seconds)
+   language = "en"           # issue language
+   ```
+
+   `base_branch`, `test_command`, `max_engineers`, `loop_interval` and `language`
+   mirror the `empress init` prompts and can be passed as CLI flags
+   (`empress init --base_branch main --test_command "…"`). For the optional
+   `[ci]` container engine, per-role `[models]`, and `[github]` sections, see the
+   [Configuration](#configuration-empresstoml) section below.
+
+2. **Health-check the project.** Run the same self-check that CI uses as its gate:
+
+   ```sh
+   bun scripts/selfcheck.ts
+   ```
+
+   It verifies the config loads, the project type-checks, and the unit tests
+   pass. Fix anything it reports before starting the loop.
+
+3. **Start the loop and keep it resident.** The Superintendent/Engineer loop is
+   driven by pi; launch it so it keeps ticking:
+
+   ```sh
+   empress run                       # stays resident, ticks on loop_interval
+   # or a single supervised pass:
+   empress run --once
+   ```
+
+   Inside pi you can also run a pass by hand with `/empress` (needs the extension:
+   `pi install /path/to/EMPRESS`). For long unattended runs, put `empress run`
+   under systemd (user service) or tmux.
+
+4. **Opt into GitHub (optional).** EMPRESS is **local-only by default** — it never
+   pushes or opens a PR until you opt in:
+
+   ```toml
+   [github]
+   enabled = true
+   owner = ""                # optional — resolved from `origin` or `gh repo view`
+   repo = ""
+   ```
+
+   With `[github] enabled = true`, landing a task pushes its branch to `origin`
+   and opens a PR into `base_branch`. You need the `gh` CLI installed and
+   authenticated, plus an `origin` remote (or explicit `owner`/`repo`). Tasks
+   then live as GitHub issues; run `empress sync` once to migrate existing local
+   tasks into issues (see [GitHub-managed issues](#github-managed-issues) below).
+
+See **[docs/architecture.md](docs/architecture.md)** for how the loop fits
+together (Superintendent, Engineers, Jev judgments, risk gates).
+
 ## 4. Create a task and run it
 
 ```sh
