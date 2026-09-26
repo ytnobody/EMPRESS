@@ -3,7 +3,7 @@
 # GitHub integration (gh) is strictly opt-in via [github] below.
 
 [project]
-base_branch = "main"
+base_branch = "develop"
 test_command = "bun scripts/selfcheck.ts"
 language = "en"
 
