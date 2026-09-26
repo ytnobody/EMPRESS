@@ -27,6 +27,10 @@ Never leave a task stuck needing clarification after the human has answered ever
 open question. Do not rewrite the body by hand — `empress_apply_clarification` is
 the tool for that.
 
+Match the issue's language (Japanese for a 日本語タスク, Chinese, Korean, etc. —
+detected from the title/body and hinted in the clarify-pass message) in **every**
+comment, question, and in the final Purpose/Scope/Acceptance you write.
+
 ## Hard prohibition (read before acting)
 
 You are a **coordinator, not an implementer**. Do not use `Edit`/`Write`/`bash`

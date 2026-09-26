@@ -18,6 +18,7 @@ import {
   closeTask,
   taskBrief,
   proposeSpec,
+  detectLanguage,
   type Task,
 } from "../domain/tasks.ts";
 import {
@@ -188,19 +189,24 @@ export default function (pi: ExtensionAPI) {
         // (deduped) so the human has something to respond to in comments, instead of
         // a bare "please clarify". The Superintendent then drives the Q&A and, when
         // resolved, rewrites the body via empress_apply_clarification.
-        const alreadyProposed = (t.comments || []).some((c) => String(c.body || "").includes("draft spec I inferred"));
+        const alreadyProposed = (t.comments || []).some((c) => String(c.body || "").includes("empress:clarify-proposal"));
         if (!alreadyProposed) {
-          const p = proposeSpec(t);
+          const lang = detectLanguage(`${t.title || ""} ${t.body || ""}`);
+          const ja = lang === "ja";
+          const p = proposeSpec(t, lang);
           const proposal = [
-            "**[empress]** This task looks under-specified. Here is a **draft spec I inferred from the title** — please **answer the open questions below** in a reply (or confirm / adjust):",
+            ja
+              ? "**[empress]** このタスクは仕様が不足しています。タイトルから推測した**ドラフト仕様**です。以下の**未解決の質問**に**返信で回答**（または確認・修正）してください："
+              : "**[empress]** This task looks under-specified. Here is a **draft spec I inferred from the title** — please **answer the open questions below** in a reply (or confirm / adjust):",
+            "<!--empress:clarify-proposal-->",
             "",
-            "**Proposed:**",
+            ja ? "**提案（ドラフト）:**" : "**Proposed:**",
             `- Purpose: ${p.purpose}`,
             `- Scope: ${p.scope}`,
             `- Acceptance Criteria: ${p.acceptance.map((a) => `[ ] ${a}`).join(" ")}`,
             `- Non-Goals: ${p.nongoals.join(", ")}`,
             "",
-            "**Open questions:**",
+            ja ? "**未解決の質問:**" : "**Open questions:**",
             ...p.questions.map((q, i) => `${i + 1}. ${q}`),
             "",
             `(reason: ${verdict.reasons.join("; ")})`,

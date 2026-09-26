@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, proposeSpec } from "../src/domain/taskstore.js";
+import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, proposeSpec, detectLanguage } from "../src/domain/taskstore.js";
 import { addComment, updateTask, getTask, closeTask, listTasks, removeTask } from "../src/domain/tasks.js";
 import { DEFAULTS } from "../src/shared/config.js";
 
@@ -124,6 +124,14 @@ test("taskstore: proposeSpec derives a draft spec + open questions from the titl
   assert.ok(p.scope.includes("Speed up startup"));
   assert.ok(p.questions.length >= 3);
   assert.ok(p.acceptance.some((a) => /question/.test(a)));
+});
+
+test("taskstore: detectLanguage + proposeSpec localize for Japanese issues", () => {
+  assert.equal(detectLanguage("今日はいい天気です"), "ja");
+  assert.equal(detectLanguage("Hello world"), "en");
+  const p = proposeSpec({ title: "導入手順をドキュメントにかく" }, "ja");
+  assert.ok(p.purpose.includes("導入手順をドキュメントにかく"));
+  assert.ok(p.questions[0].includes("導入手順をドキュメントにかく"));
 });
 
 test("taskstore: buildMarkdown derives Purpose/Scope from title when omitted (no _to be filled_ stubs)", () => {

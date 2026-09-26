@@ -15,7 +15,7 @@ import path from "node:path";
 import { loadConfig, type LoadedConfig } from "../shared/config.ts";
 import { readLoopState, patchLoopState, type LoopStatePatch } from "./state.ts";
 import { tasksHash } from "../domain/wake.ts";
-import { listTasks } from "../domain/tasks.ts";
+import { listTasks, detectLanguage } from "../domain/tasks.ts";
 import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../domain/readiness.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +53,7 @@ interface RunPassOptions {
   mode?: "run" | "audit" | "clarify";
   audit?: boolean;
   clarificationIds?: number[];
+  clarifyLang?: Record<number, string>;
 }
 
 interface RunPassResult {
@@ -61,7 +62,7 @@ interface RunPassResult {
   err: string;
 }
 
-function runPass({ cwd, config, model, thinking, audit = false, mode = "run", clarificationIds = [] }: RunPassOptions): Promise<RunPassResult> {
+function runPass({ cwd, config, model, thinking, audit = false, mode = "run", clarificationIds = [], clarifyLang = {} }: RunPassOptions): Promise<RunPassResult> {
   const agentPrompt = path.join(cwd, ".empress", "agents", "superintendent.md");
   const args: string[] = ["--print", "--no-session", "-e", EXTENSION];
   if (model) args.push("--model", model);
@@ -69,8 +70,12 @@ function runPass({ cwd, config, model, thinking, audit = false, mode = "run", cl
   if (config.project?.test_command) process.env.EMPRESS_TEST_COMMAND = config.project.test_command;
   args.push("--append-system-prompt", agentPrompt);
   if (mode === "audit") args.push(AUDIT_MSG);
-  else if (mode === "clarify") args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}`);
-  else args.push(SUPER_MSG);
+  else if (mode === "clarify") {
+    const langHint = Object.entries(clarifyLang).length
+      ? `Issue languages (detected) to match in ALL your comments/questions: ${Object.entries(clarifyLang).map(([id, l]) => `#${id}=${l}`).join(", ")}.`
+      : "Respond in the language of each issue's title/body (detected: ja for Japanese, zh, ko, else en).";
+    args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}\n${langHint}`);
+  } else args.push(SUPER_MSG);
 
   return new Promise((resolve) => {
     const proc = spawn("pi", args, { cwd, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
@@ -212,8 +217,10 @@ export async function runLoop(
             pass++;
             const started = new Date().toISOString();
             const ids = notReady.map((t) => t.id);
+            const langMap: Record<number, string> = {};
+            for (const t of notReady) langMap[t.id] = detectLanguage(`${t.title || ""} ${t.body || ""}`);
             console.log(`\n--- clarify pass ${pass} (${started}) clarification: #${ids.join(", #")} ---`);
-            const cres = await runPass({ cwd, config, model: superModel, thinking, mode: "clarify", clarificationIds: ids });
+            const cres = await runPass({ cwd, config, model: superModel, thinking, mode: "clarify", clarificationIds: ids, clarifyLang: langMap });
             await handleResult(cwd, cres, started, pass, config);
           } else {
             console.log(`\n[wake ${new Date().toISOString()}] ${actionable.length} actionable, 0 ready (${checks.filter((c) => !c.ready).length} not-ready) — skip (zero LLM)`);

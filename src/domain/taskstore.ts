@@ -539,6 +539,42 @@ export function hasHumanReply(t: Task): boolean {
   return !/^\*\*\[[^\]]+\]\*\*/.test(String(last.body || "").trim());
 }
 
+/**
+ * Best-effort language detection from issue text (Japanese / Chinese / Korean /
+ * English). Used so proposal comments and the Q&A match the issue's language.
+ */
+export function detectLanguage(text: string): string {
+  const t = text || "";
+  if (/[\u3040-\u30ff]/.test(t)) return "ja"; // hiragana / katakana
+  if (/[\uac00-\ud7af]/.test(t)) return "ko";
+  if (/[\u4e00-\u9fff]/.test(t)) return "zh"; // han
+  return "en";
+}
+
+/** Clarification strings keyed by language code (falls back to en). */
+const PROPOSAL_L10N: Record<string, { purpose: (t: string) => string; scope: (t: string) => string; acceptance: string; questions: (t: string) => string[] }> = {
+  en: {
+    purpose: (t) => `The harness should address: \"${t}\" so the acceptance criteria below are met.`,
+    scope: (t) => `Covers only the change needed to satisfy the acceptance criteria for \"${t}\".`,
+    acceptance: "(to be pinned once the questions below are answered)",
+    questions: (t) => [
+      `What should \"${t}\" concretely do, and why? (I inferred this from the title — correct me.)`,
+      "What is the acceptance criterion / testable condition that marks it done?",
+      "Anything explicitly out of scope (non-goals)?",
+    ],
+  },
+  ja: {
+    purpose: (t) => `ハーネスが「${t}」を実現できるよう、下記の受け入れ条件を満たすこと。`,
+    scope: (t) => `「${t}」の受け入れ条件を満たすために必要な変更のみに限定する。`,
+    acceptance: "（下記の質問への回答後に確定）",
+    questions: (t) => [
+      `「${t}」は具体的に何をすべきで、なぜですか？（タイトルからの推測です——違えば訂正してください）`,
+      "完了とみなす、テスト可能な受け入れ条件は何ですか？",
+      "対象外（Non-Goals）にしたいことはありますか？",
+    ],
+  },
+};
+
 /** Draft clarification: a proposed Purpose/Scope/Acceptance/Non-Goals + open questions. */
 export interface SpecProposal {
   purpose: string;
@@ -550,23 +586,21 @@ export interface SpecProposal {
 
 /**
  * Deterministic starting point for the clarification Q&A. Derives a draft spec
- * from the task's title/body and lists the open questions the human should
- * answer. The Superintendent posts this as a proposal comment; when the answers
- * resolve the open questions, the Superintendent rewrites the issue body (via
- * empress_apply_clarification) and clears needs_clarification.
+ * from the task's title/body (in the issue's detected language) and lists the
+ * open questions the human should answer. The Superintendent posts this as a
+ * proposal comment; when the answers resolve the open questions, the
+ * Superintendent rewrites the issue body (via empress_apply_clarification) and
+ * clears needs_clarification.
  */
-export function proposeSpec(t: Pick<Task, "title" | "body">): SpecProposal {
+export function proposeSpec(t: Pick<Task, "title" | "body">, lang: string = detectLanguage(`${t.title || ""} ${t.body || ""}`)): SpecProposal {
+  const l = PROPOSAL_L10N[lang] || PROPOSAL_L10N.en;
   const title = (t.title || "this task").trim();
   return {
-    purpose: `The harness should address: \"${title}\" so the acceptance criteria below are met.`,
-    scope: `Covers only the change needed to satisfy the acceptance criteria for \"${title}\".`,
-    acceptance: ["(to be pinned once the questions below are answered)"],
-    nongoals: ["_none yet_",],
-    questions: [
-      `What should \"${title}\" concretely do, and why? (I inferred this from the title — correct me.)`,
-      "What is the acceptance criterion / testable condition that marks it done?",
-      "Anything explicitly out of scope (non-goals)?",
-    ],
+    purpose: l.purpose(title),
+    scope: l.scope(title),
+    acceptance: [l.acceptance],
+    nongoals: ["_none yet_"],
+    questions: l.questions(title),
   };
 }
 
