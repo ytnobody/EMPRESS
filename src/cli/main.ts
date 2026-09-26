@@ -9,6 +9,7 @@ import { runLoop } from "./run.ts";
 import { doctor } from "./doctor.ts";
 import { readLoopState, patchLoopState } from "./state.ts";
 import { createTask, listTasks, removeTask } from "../domain/tasks.ts";
+import { syncLocalToGh } from "../domain/taskstore.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -112,6 +113,25 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
       console.log(`consecutive failures: ${s.consecutive_failures ?? 0}`);
       break;
     }
+    case "sync": {
+      const cfgSync = loadConfig(cwd);
+      if (!cfgSync.github?.enabled) {
+        console.error("empress: [github] enabled=false — nothing to sync. Set [github] enabled=true first.");
+        break;
+      }
+      try {
+        const created = syncLocalToGh(cwd, cfgSync);
+        if (!created.length) {
+          console.log("empress: no open local tasks to sync.");
+          break;
+        }
+        for (const c of created) console.log(`  local #${c.id} -> GitHub issue #${c.ghNumber}: ${c.title}`);
+      } catch (e) {
+        console.error(`empress: sync failed: ${(e as { message?: unknown }).message}`);
+        process.exitCode = 1;
+      }
+      break;
+    }
     case "doctor":
       await doctor(cwd);
       break;
@@ -138,6 +158,7 @@ function printHelp(ver: string) {
   console.log("  empress list [--all]               List open tasks");
   console.log("  empress run [--once] [--model M]   Start the Superintendent tick loop");
   console.log("  empress pause|resume|quit|status   Control autonomous operation");
+  console.log("  empress sync                         Migrate open local tasks to GitHub issues ([github] enabled)");
   console.log("  empress doctor                     Check prerequisites");
   console.log("  empress version                    Print version");
   console.log("");
