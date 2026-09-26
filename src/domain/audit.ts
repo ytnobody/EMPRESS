@@ -89,10 +89,6 @@ export function oversizedFiles(root: string, thresholdLines = 600): AuditFinding
 export function trackedSecretFiles(root: string): AuditFinding[] {
   const out: AuditFinding[] = [];
   try {
-    const res = fs.existsSync(path.join(root, ".git"))
-      ? []
-      : [];
-    void res;
     const isRepo = fs.existsSync(path.join(root, ".git"));
     const files = isRepo
       ? execGitLsFiles(root)

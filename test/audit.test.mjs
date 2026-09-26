@@ -45,16 +45,26 @@ test("oversizedFiles: flags files over the line threshold", () => {
 });
 
 // Verifies: a tracked .env file is flagged as a secure-axis concern.
-test("trackedSecretFiles: flags tracked .env-ish entries", () => {
+// [ASSUMPTION] When git is unavailable (the [ci] container oven/bun:1.4-alpine
+// ships no git binary) the fixture can't be tracked, so the test skips instead
+// of failing on an impossible setup — host runs (git present) are the
+// authority for this spec.
+test("trackedSecretFiles: flags tracked .env-ish entries", (t) => {
   const root = mkRepo({ "src/a.ts": "export const a=1;", ".env": "KEY=x\n", ".env.example": "KEY=\n" });
   const { execFileSync } = require("node:child_process");
   fs.mkdirSync(path.join(root, ".git"), { recursive: true });
+  let setupOk = false;
   try {
     execFileSync("git", ["-C", root, "init", "-q"]);
     execFileSync("git", ["-C", root, "add", ".env", ".env.example"]);
     execFileSync("git", ["-C", root, "commit", "-qm", "x"]);
+    setupOk = true;
   } catch {
-    // no git available: skip
+    // git absent (e.g. CI container): nothing is tracked -> skip the spec.
+  }
+  if (!setupOk) {
+    t.skip("git not available in this environment");
+    return;
   }
   const hits = trackedSecretFiles(root);
   assert.ok(hits.some((h) => h.axis === "secure" && /\.env/.test(h.title)));
