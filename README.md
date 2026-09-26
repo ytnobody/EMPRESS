@@ -109,6 +109,7 @@ with a review comment, never auto-merged.
 empress init [flags]               Scaffold .empress config + role prompts
 empress task "<title>" [flags]     Create a task
 empress list [--all]               List open tasks
+empress sync                      Migrate open local tasks to GitHub issues ([github] enabled)
 empress run [--once] [--model M]   Event-driven loop / single pass
 empress pause | resume | quit | status   Control autonomous operation
 empress doctor                     Check prerequisites
@@ -208,6 +209,22 @@ When `[github] enabled = true`, landing a task pushes its branch to `origin`
 and opens a PR against `base_branch` (best-effort; local merge still happens if
 the PR step fails). You must have the `gh` CLI installed and authenticated, and
 the repo needs an `origin` remote (or explicit `owner`/`repo`).
+
+### GitHub-managed issues
+
+With `[github] enabled = true`, tasks are stored as **GitHub issues** (backed by
+the `gh` CLI) instead of local `.empress/tasks/*.md` files. In this mode:
+
+- **`empress task "…"`** creates a GitHub issue (task id = issue number).
+- **`empress list`** lists the repo's open issues as tasks.
+- **`empress sync`** migrates open **local** tasks (created while GitHub was
+  disabled) into GitHub issues — a one-way bootstrap from local files to
+  issues, not a live sync. Run it once after enabling `[github]`.
+
+Status and labels map to issue state/labels (see
+`docs/decisions/task-18-gh-issue-taskstore.md`). If gh is unavailable or the
+repo can't be resolved, EMPRESS silently falls back to the local task store so
+it keeps running offline.
 
 ## Troubleshooting
 

@@ -10,7 +10,10 @@ Central documentation directory.
 
 ## README
 The user-facing quickstart + command reference stays at the repo root:
-**[`../README.md`](../README.md)**.
+**[`../README.md`](../README.md)**. That includes a **GitHub-managed issues**
+section explaining that with `[github] enabled = true` tasks become GitHub
+issues (`empress task`/`list`/`sync`) and that `empress sync` migrates open
+local tasks to issues.
 
 ## decisions/ index
 
