@@ -7,7 +7,8 @@ import { EMPRESS_DIR } from "../shared/config.ts";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", ".cache", EMPRESS_DIR]);
 const MARKER = /(?:#|\/\/)\s?ponytail:\s*(.*)$/i;
-const TRIGGER_WORDS = ["if ", "when ", "until ", "once ", "if/", "upgrade", "revisit", "later", "@"];
+const CONT_LINE = /^\s*(?:\/\/|#)\s*/; // a following comment line may be a wrapped continuation
+const TRIGGER_RE = /(if|when|until|once|if\/|upgrade|revisit|later)/i;
 
 export interface PonytailRow {
   file: string;
@@ -34,24 +35,37 @@ function walk(dir: string, out: PonytailRow[], relBase: string): void {
       const ext = path.extname(e.name);
       if (!/\.(js|ts|jsx|tsx|py|go|rb|rs|java|cs|c|cpp|sh|pl|php|swift)$/.test(ext)) continue;
       try {
-        let text = fs.readFileSync(full, "utf-8");
-        text.split(/\r?\n/).forEach((line, idx) => {
-          const m = MARKER.exec(line);
-          if (!m) return;
-          const body = (m[1] || "").trim();
-          const [ceiling, ...rest] = body.split(/[,;]/).map((s) => s.trim());
-          const upgrade = rest.join("; ");
-          const noTrigger = !TRIGGER_WORDS.some((w) => /(if|when|until|once|if\/|upgrade|revisit|later)/i.test(body))
-            || !upgrade;
+        const lines = fs.readFileSync(full, "utf-8").split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+          const m = MARKER.exec(lines[i]);
+          if (!m) continue;
+          const markerLine = i; // row reports the marker's first line
+          // Join wrapped continuation comment lines (marker text spilled onto the
+          // next comment line). Stop after a sentence ends so a following
+          // standalone comment is not swallowed; stop at a new ponytail: marker.
+          const cont: string[] = [];
+          for (let j = i + 1; j < lines.length; j++) {
+            const c = CONT_LINE.exec(lines[j]);
+            if (!c) break;
+            const t = lines[j].slice(c[0].length).trim();
+            if (/^ponytail:/i.test(t)) break;
+            cont.push(t);
+            if (/[.!?]$/.test(t)) break;
+            i = j; // continuation consumed; skip it in the outer scan
+          }
+          const body = [m[1].trim(), ...cont].join(" ").trim();
+          const [ceiling, ...rest] = body.split(",").map((s) => s.trim());
+          const upgrade = rest.join(", ");
+          const noTrigger = !TRIGGER_RE.test(body) || !upgrade;
           out.push({
             file: rel,
-            line: idx + 1,
+            line: markerLine + 1,
             ceiling: ceiling || "(unspecified)",
             upgrade: upgrade || "(none)",
             noTrigger,
-            raw: `${rel}:${idx + 1}, ${body || "ponytail marker"}. ceiling: ${ceiling || "?"}${upgrade ? `. upgrade: ${upgrade}` : ""}${noTrigger ? "  [no-trigger]" : ""}`,
+            raw: `${rel}:${markerLine + 1}, ${body || "ponytail marker"}. ceiling: ${ceiling || "?"}${upgrade ? `. upgrade: ${upgrade}` : ""}${noTrigger ? "  [no-trigger]" : ""}`,
           });
-        });
+        }
       } catch {
         /* unreadable file */
       }
