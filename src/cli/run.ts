@@ -37,12 +37,22 @@ const AUDIT_MSG =
   "(dedupe by simple title match; prefer auto-landable LOW/MEDIUM tasks, separate control-plane HIGH ones) " +
   "and report what you did. Do NOT spawn Engineers or land anything during an audit pass.";
 
+const CLARIFY_MSG =
+  "You are the EMPRESS Superintendent running a CLARIFICATION pass. The following tasks are marked needs_clarification and have a pending human reply in their comments. " +
+  "Drive the Q&A **entirely via the issue's comments** — do NOT rewrite the body directly yet. " +
+  "For each: `empress_get_task` to read the full comment thread (the human's answers are the plain-text replies without a [agent] marker prefix, per hasHumanReply). " +
+  "Incorporate the answers into a refined understanding, then either (a) post a follow-up question as a comment if something is still ambiguous, or (b) if the open questions are resolved, " +
+  "**rewrite the issue body once with the resolved Purpose/Scope/Acceptance/Non-Goals via `empress_apply_clarification`** (which clears needs_clarification). " +
+  "Do not spawn Engineers or land anything in this pass. End with a short report of what you asked / clarified.";
+
 interface RunPassOptions {
   cwd: string;
   config: LoadedConfig;
   model?: string;
   thinking?: string;
+  mode?: "run" | "audit" | "clarify";
   audit?: boolean;
+  clarificationIds?: number[];
 }
 
 interface RunPassResult {
@@ -51,14 +61,16 @@ interface RunPassResult {
   err: string;
 }
 
-function runPass({ cwd, config, model, thinking, audit = false }: RunPassOptions): Promise<RunPassResult> {
+function runPass({ cwd, config, model, thinking, audit = false, mode = "run", clarificationIds = [] }: RunPassOptions): Promise<RunPassResult> {
   const agentPrompt = path.join(cwd, ".empress", "agents", "superintendent.md");
   const args: string[] = ["--print", "--no-session", "-e", EXTENSION];
   if (model) args.push("--model", model);
   if (thinking) args.push("--thinking", thinking);
   if (config.project?.test_command) process.env.EMPRESS_TEST_COMMAND = config.project.test_command;
   args.push("--append-system-prompt", agentPrompt);
-  args.push(audit ? AUDIT_MSG : SUPER_MSG);
+  if (mode === "audit") args.push(AUDIT_MSG);
+  else if (mode === "clarify") args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}`);
+  else args.push(SUPER_MSG);
 
   return new Promise((resolve) => {
     const proc = spawn("pi", args, { cwd, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
@@ -191,8 +203,22 @@ export async function runLoop(
         }
         const readyIds = checks.filter((c) => c.ready).map((c) => c.task.id);
         if (readyIds.length === 0) {
-          console.log(`\n[wake ${new Date().toISOString()}] ${actionable.length} actionable, 0 ready (${checks.filter((c) => !c.ready).length} not-ready) — skip (zero LLM)`);
-          patchLoopState(cwd, { last_skip_reason: `no ready work (${actionable.length} actionable)` });
+          const notReady = checks.filter((c) => !c.ready).map((c) => c.task);
+          if (notReady.length) {
+            // Clarification Q&A pass: thin/under-specified tasks (incl. fresh
+            // human-created issues) — the Superintendent drives the Q&A via
+            // comments and, when resolved, rewrites the issue body + clears
+            // needs_clarification so the next pass can implement.
+            pass++;
+            const started = new Date().toISOString();
+            const ids = notReady.map((t) => t.id);
+            console.log(`\n--- clarify pass ${pass} (${started}) clarification: #${ids.join(", #")} ---`);
+            const cres = await runPass({ cwd, config, model: superModel, thinking, mode: "clarify", clarificationIds: ids });
+            await handleResult(cwd, cres, started, pass, config);
+          } else {
+            console.log(`\n[wake ${new Date().toISOString()}] ${actionable.length} actionable, 0 ready (${checks.filter((c) => !c.ready).length} not-ready) — skip (zero LLM)`);
+            patchLoopState(cwd, { last_skip_reason: `no ready work (${actionable.length} actionable)` });
+          }
         } else {
           pass++;
           const started = new Date().toISOString();
@@ -208,7 +234,7 @@ export async function runLoop(
       pass++;
       const started = new Date().toISOString();
       console.log(`\n--- audit pass ${pass} (${started}) ---`);
-      const res = await runPass({ cwd, config, model: superModel, thinking, audit: true });
+      const res = await runPass({ cwd, config, model: superModel, thinking, mode: "audit" });
       await handleResult(cwd, res, started, pass, config);
     }
 

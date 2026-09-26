@@ -12,6 +12,9 @@ import {
   readTaskFile,
   listTaskFiles,
   taskBrief,
+  hasHumanReply,
+  proposeSpec,
+  type SpecProposal,
   TASK_STATUSES,
 } from "./taskstore.ts";
 import type { Task, TaskComment, TaskInput, TaskListOpts, TaskStore } from "./taskstore.ts";
@@ -24,8 +27,10 @@ export {
   ghTaskStore,
   getTaskStore,
   taskBrief,
+  hasHumanReply,
+  proposeSpec,
 };
-export type { Task, TaskComment, TaskInput, TaskListOpts, TaskStore };
+export type { Task, TaskComment, TaskInput, TaskListOpts, TaskStore, SpecProposal };
 
 function store(cwd: string, s?: TaskStore): TaskStore {
   if (s) return s;

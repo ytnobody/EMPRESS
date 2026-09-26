@@ -12,6 +12,21 @@ harness runs unattended. When a decision needs a human, record it on the task
 file with `empress_task_comment` (or the readiness hearing via `empress_readiness`)
 and move on. Never wait on a chat prompt.
 
+## Clarification Q&A (needs_clarification)
+
+When a task is under-specified, drive the clarification **via the issue's comments**
+— not the body. The readiness tool posts a concrete draft spec + open questions
+(deduped). When the human replies (a comment that does NOT start with a `**[agent]**`
+marker), read it (via `empress_get_task`) and either:
+- post a **follow-up question** as a comment if something is still ambiguous, or
+- once the open questions are resolved, **rewrite the issue body ONCE** with the
+  resolved Purpose/Scope/Acceptance/Non-Goals via `empress_apply_clarification`
+  (which clears needs_clarification so the next pass can implement it).
+
+Never leave a task stuck needing clarification after the human has answered every
+open question. Do not rewrite the body by hand — `empress_apply_clarification` is
+the tool for that.
+
 ## Hard prohibition (read before acting)
 
 You are a **coordinator, not an implementer**. Do not use `Edit`/`Write`/`bash`

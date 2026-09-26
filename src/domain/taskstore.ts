@@ -527,9 +527,52 @@ export function getTaskStore(cwd: string, config: LoadedConfig, deps: StoreDeps 
 }
 
 /**
- * Human-readable single-line summary of a task for passing to an Engineer.
- * (Defined here and re-exported by tasks.ts for compatibility.)
+ * True when the task's LATEST comment is a human reply rather than an agent
+ * comment. Comments posted by the harness carry a `**[agent]**` marker prefix
+ * (e.g. `**[empress]**`, `**[superintendent]**`, `**[engineer]**`); on GitHub all
+ * comments are authored by the CLI token account, so this prefix convention is
+ * how we tell agent comments apart from a genuine human reply.
  */
+export function hasHumanReply(t: Task): boolean {
+  if (!t.comments || t.comments.length === 0) return false;
+  const last = t.comments[t.comments.length - 1];
+  return !/^\*\*\[[^\]]+\]\*\*/.test(String(last.body || "").trim());
+}
+
+/** Draft clarification: a proposed Purpose/Scope/Acceptance/Non-Goals + open questions. */
+export interface SpecProposal {
+  purpose: string;
+  scope: string;
+  acceptance: string[];
+  nongoals: string[];
+  questions: string[];
+}
+
+/**
+ * Deterministic starting point for the clarification Q&A. Derives a draft spec
+ * from the task's title/body and lists the open questions the human should
+ * answer. The Superintendent posts this as a proposal comment; when the answers
+ * resolve the open questions, the Superintendent rewrites the issue body (via
+ * empress_apply_clarification) and clears needs_clarification.
+ */
+export function proposeSpec(t: Pick<Task, "title" | "body">): SpecProposal {
+  const title = (t.title || "this task").trim();
+  return {
+    purpose: `The harness should address: \"${title}\" so the acceptance criteria below are met.`,
+    scope: `Covers only the change needed to satisfy the acceptance criteria for \"${title}\".`,
+    acceptance: ["(to be pinned once the questions below are answered)"],
+    nongoals: ["_none yet_",],
+    questions: [
+      `What should \"${title}\" concretely do, and why? (I inferred this from the title — correct me.)`,
+      "What is the acceptance criterion / testable condition that marks it done?",
+      "Anything explicitly out of scope (non-goals)?",
+    ],
+  };
+}
+
+/**
+ * Human-readable single-line summary of a task for passing to an Engineer.
+ * (Defined here and re-exported by tasks.ts for compatibility.) */
 export function taskBrief(t: Task): string {
   return [
     `Task #${t.id}: ${t.title}`,

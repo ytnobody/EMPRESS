@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore } from "../src/domain/taskstore.js";
+import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, proposeSpec } from "../src/domain/taskstore.js";
 import { addComment, updateTask, getTask, closeTask, listTasks, removeTask } from "../src/domain/tasks.js";
 import { DEFAULTS } from "../src/shared/config.js";
 
@@ -110,6 +110,20 @@ test("taskstore: buildGhBody / stripMetadata are inverse for branch+pr", () => {
   assert.equal(stripMetadata(full), "hello body");
   assert.ok(full.includes("<!--empress:branch=empress/task-1-->"));
   assert.ok(full.includes("<!--empress:pr=7-->"));
+});
+
+test("taskstore: hasHumanReply flags only plain (non-agent) latest comments", () => {
+  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "**[empress]** draft spec" }] }), false);
+  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "**[superintendent]** follow-up" }, { at: "", author: "x", body: "I think it should do X" }] }), true);
+  assert.equal(hasHumanReply({ comments: [] }), false);
+});
+
+test("taskstore: proposeSpec derives a draft spec + open questions from the title", () => {
+  const p = proposeSpec({ title: "Speed up startup", body: "# Speed up startup" });
+  assert.ok(p.purpose.includes("Speed up startup"));
+  assert.ok(p.scope.includes("Speed up startup"));
+  assert.ok(p.questions.length >= 3);
+  assert.ok(p.acceptance.some((a) => /question/.test(a)));
 });
 
 test("taskstore: buildMarkdown derives Purpose/Scope from title when omitted (no _to be filled_ stubs)", () => {

@@ -17,6 +17,7 @@ import {
   addComment,
   closeTask,
   taskBrief,
+  proposeSpec,
   type Task,
 } from "../domain/tasks.ts";
 import {
@@ -183,23 +184,54 @@ export default function (pi: ExtensionAPI) {
       if (!t) return reply(`task #${params.id} not found`);
       const verdict = await checkReadiness(cwd, config, t);
       if (verdict.needs_clarification) {
-        if (!t.needs_clarification) {
-          const hearing = [
-            "This task is not ready to implement. Please clarify:",
-            "- **Purpose** — what we are building and why",
-            "- **Scope** — what is / is not included",
-            "- **Acceptance Criteria** — concrete, testable conditions",
-            "- **Non-Goals** — explicit exclusions",
+        // Proposal-based clarification: post a concrete draft spec + open questions
+        // (deduped) so the human has something to respond to in comments, instead of
+        // a bare "please clarify". The Superintendent then drives the Q&A and, when
+        // resolved, rewrites the body via empress_apply_clarification.
+        const alreadyProposed = (t.comments || []).some((c) => String(c.body || "").includes("draft spec I inferred"));
+        if (!alreadyProposed) {
+          const p = proposeSpec(t);
+          const proposal = [
+            "**[empress]** This task looks under-specified. Here is a **draft spec I inferred from the title** — please **answer the open questions below** in a reply (or confirm / adjust):",
+            "",
+            "**Proposed:**",
+            `- Purpose: ${p.purpose}`,
+            `- Scope: ${p.scope}`,
+            `- Acceptance Criteria: ${p.acceptance.map((a) => `[ ] ${a}`).join(" ")}`,
+            `- Non-Goals: ${p.nongoals.join(", ")}`,
+            "",
+            "**Open questions:**",
+            ...p.questions.map((q, i) => `${i + 1}. ${q}`),
             "",
             `(reason: ${verdict.reasons.join("; ")})`,
           ].join("\n");
-          addComment(cwd, params.id, "empress", hearing);
+          addComment(cwd, params.id, "empress", proposal);
           updateTask(cwd, params.id, { needs_clarification: true, status: "blocked" });
           t.needs_clarification = true;
         }
         return reply(JSON.stringify({ ready: false, reasons: verdict.reasons, jev: verdict.jev }));
       }
       return reply(JSON.stringify({ ready: true, reasons: verdict.reasons, jev: verdict.jev }));
+    },
+  });
+
+  pi.registerTool({
+    name: "empress_apply_clarification",
+    label: "Empress Apply Clarification",
+    description: "Rewrite a needs_clarification task's issue body with the RESOLVED spec and clear the needs_clarification flag / status so the task becomes actionable. Call this once the clarification Q&A (comments) has answered the open questions; the Superintendent is the one who finalizes the spec, not the human.",
+    parameters: Type.Object({ id: Type.Number(), body: Type.String(), status: Type.Optional(Type.String({ default: "open" })) }),
+    async execute(_id, params) {
+      const cwd = projectDir();
+      if (!getTask(cwd, params.id)) return reply(`task #${params.id} not found`);
+      const updated = updateTask(cwd, params.id, { needs_clarification: false, status: params.status || "open" }, params.body);
+      if (!updated) return reply(`task #${params.id} not found`);
+      addComment(
+        cwd,
+        params.id,
+        "empress",
+        "Clarified — drafted the resolved spec into the task body (needs_clarification cleared). The next pass can implement it."
+      );
+      return reply(JSON.stringify({ ok: true, id: params.id, status: (updated as Task).status }));
     },
   });
 
