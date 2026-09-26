@@ -1,6 +1,6 @@
 // Review triage — decide whether a diff needs LLM review or can be fast-pathed.
 //
-// Layered, cheapest-first (see DESIGN.md §7.2):
+// Layered, cheapest-first (see docs/architecture.md §7.2):
 //   L1 deterministic (free): secret/dangerous pattern scan + convention signals
 //                            (code changed without tests => PFT §9 suspicion)
 //   L2 Jev (only when TYPESAFE_API_KEY is set): ONE noul call — "does this

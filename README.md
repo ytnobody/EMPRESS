@@ -16,7 +16,7 @@ EMPRESS is a fully-automatic development harness with three shaping decisions:
 
 > **"pi is the star. EMPRESS is the toolbox for local + judgment operations."**
 
-See **[DESIGN.md](DESIGN.md)** for the full architecture.
+See **[docs/architecture.md](docs/architecture.md)** for the full architecture.
 
 ---
 

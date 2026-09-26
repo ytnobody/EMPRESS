@@ -44,7 +44,7 @@ As Superintendent:
 - **Brief Engineers to follow both.** The engineer role prompt carries the
   guidance; do not elaborate unless the task is unusual.
 - **Review against the design doc.** When an Engineer reports a non-trivial task,
-  `read` its worktree's design doc (e.g. `DESIGN.md`) *and* the tests, and check
+  `read` its worktree's design doc (e.g. `docs/architecture.md`) *and* the tests, and check
   they are spec-derived (each test has a "what this verifies" comment, §7) — not
   implementation-tracing. Treat the design doc as the source of truth (§13).
 - **Run a Ponytail simplicity pass on every diff before landing.** Review the

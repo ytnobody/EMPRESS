@@ -130,8 +130,11 @@ Superintendent ran under.
 empress/
 ├── package.json               # pi package manifest + bin/empress + pi-package
 ├── tsconfig.tson
-├── README.md                  # usage
-├── DESIGN.md                  # this file
+├── README.md                  # usage, quickstart
+├── docs/
+│   ├── README.md              # docs index
+│   ├── architecture.md        # this file
+│   └── decisions/             # per-change design decision records
 ├── bin/
 │   └── empress.ts             # CLI entry (TypeScript, run with Bun)
 ├── src/
@@ -141,7 +144,8 @@ empress/
 │   │   └── shell.ts           # runSync / runAsync helpers
 │   ├── domain/
 │   │   ├── jev.ts             # native Jev client (fetch; pure request/parse)
-│   │   ├── tasks.ts           # local task store (.empress/tasks)
+│   │   ├── tasks.ts           # task store API delegate (cwd-first, sync)
+│   │   ├── taskstore.ts       # task backends: local .md files + GitHub-issue store
 │   │   ├── git.ts             # worktree/branch/merge/diff helpers
 │   │   ├── github.ts          # opt-in gh integration (resolveRepo, pushBranchAndCreatePr)
 │   │   ├── risk.ts            # deterministic + Jev risk evaluation
