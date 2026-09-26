@@ -137,6 +137,41 @@ export function branchIsAncestor(cwd: string, base: string, branch: string): boo
   return run("git", ["-C", cwd, "merge-base", "--is-ancestor", base, branch]).code === 0;
 }
 
+export interface BranchPruneResult {
+  pruned: string[];
+  skipped: string[];
+}
+
+/**
+ * Safely delete local branches that are fully merged into `base` and are not
+ * protected (the current branch, the base branch itself, `main`, `develop`, or
+ * names passed via `keep`). Uses `git branch -d` (safe delete): a branch that is
+ * not fully merged, is checked out (e.g. in a live worktree), or is the current
+ * branch is skipped rather than force-deleted. Deterministic and merge-safe —
+ * this is what lets the harness auto-prune dead branches instead of filing a
+ * housekeeping task for them.
+ */
+export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep?: string[] } = {}): BranchPruneResult {
+  const keep = new Set<string>([...(opts.keep || []), "main", "develop", base]);
+  const current = currentBranch(cwd);
+  if (current) keep.add(current);
+  const candidates = listBranches(cwd).filter((b) => !keep.has(b));
+  const pruned: string[] = [];
+  const skipped: string[] = [];
+  for (const b of candidates) {
+    // pruned iff the branch is already an ancestor of base (fully merged in).
+    const mergedIn = run("git", ["-C", cwd, "merge-base", "--is-ancestor", b, base]).code === 0;
+    if (!mergedIn) {
+      skipped.push(b);
+      continue;
+    }
+    const res = run("git", ["-C", cwd, "branch", "-d", b]);
+    if (res.code === 0) pruned.push(b);
+    else skipped.push(b); // checked out in a worktree, or on a non-fast-forward head
+  }
+  return { pruned, skipped };
+}
+
 /**
  * Pure decision for landBranch: whether to emit an update-fast-forward against
  * origin/<base>. Returns a Command or null (no-op). Guards the origin path so a

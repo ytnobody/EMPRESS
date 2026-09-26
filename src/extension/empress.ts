@@ -25,6 +25,7 @@ import {
   listBranches,
   landBranch,
   isGitRepo,
+  pruneStaleMergedBranches,
 } from "../domain/git.ts";
 import { runProjectCi } from "../domain/ci.ts";
 import { runVulnCheck } from "../domain/vuln.ts";
@@ -468,8 +469,16 @@ export default function (pi: ExtensionAPI) {
     description: "Deterministic idle-audit scans across three axes: modern (TODO/FIXME/HACK rot, oversized files, legacy .js residue), secure (tracked secret-ish files like .env/credentials), light (large files). Returns per-axis findings + summary. The Superintendent audit pass files REAL findings as tasks (dedupe); the loop then implements+lands them when idle.",
     parameters: Type.Object({}),
     async execute(_id, params) {
-      const r = collectAuditFindings(projectDir());
-      const lines = [r.summary, "", ...r.findings.map((f) => `[${f.axis}] ${f.title} — ${f.detail}`)];
+      const cwd = projectDir();
+      const r = collectAuditFindings(cwd);
+      const lines: string[] = [r.summary, "", ...r.findings.map((f) => `[${f.axis}] ${f.title} — ${f.detail}`)];
+      // Auto-prune stale merged local branches (safe delete) instead of filing a
+      // housekeeping task for them — dead merged branches are cleaned up by the
+      // harness itself. protects current branch + base + main + develop.
+      const base = cfg().project.base_branch || "develop";
+      const pr = pruneStaleMergedBranches(cwd, base);
+      if (pr.pruned.length) lines.push("", `Pruned ${pr.pruned.length} stale merged local branch(es): ${pr.pruned.join(", ")}`);
+      if (pr.skipped.length) lines.push("", `Kept branch(es) (not fully merged or in use): ${pr.skipped.join(", ")}`);
       return { content: [{ type: "text", text: lines.join("\n") }], details: { axisCounts: r.summary } };
     },
   });
