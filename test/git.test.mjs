@@ -30,6 +30,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { pruneStaleMergedBranches } from "../src/domain/git.js";
 
+function gitAvailable() {
+  try {
+    execFileSync("git", ["--version"], { stdio: "pipe", encoding: "utf-8" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function gitRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-git-prune-"));
   const g = (args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe", encoding: "utf-8" });
@@ -46,7 +55,13 @@ function gitRepo() {
   return dir;
 }
 
-test("pruneStaleMergedBranches: deletes merged, keeps unmerged + protected", () => {
+test("pruneStaleMergedBranches: deletes merged, keeps unmerged + protected", (t) => {
+  if (!gitAvailable()) {
+    // git absent (e.g. CI container): the fixture can't be set up -> skip the
+    // spec. Host runs (git present) are the authority for this behavior.
+    t.skip("git not available in this environment");
+    return;
+  }
   const dir = gitRepo();
   try {
     const res = pruneStaleMergedBranches(dir, "develop");
