@@ -55,13 +55,9 @@ failure_notify_threshold = 3
 wake_interval = 60
 audit_interval = 1800
 
-# GitHub integration via the gh CLI — DISABLED (local-only default).
-# Set enabled = true + owner/repo (or an origin remote) to push landed task
-# branches and open PRs; e.g. for self-hosting this repo on GitHub:
-#   enabled = true
-#   owner = "yourname"
-#   repo = "EMPRESS"
+# GitHub integration via the gh CLI — ENABLED for ytnobody/EMPRESS.
+# Pushes landed task branches to origin and opens PRs against base_branch.
 [github]
-enabled = false
-owner = ""
-repo = ""
+enabled = true
+owner = "ytnobody"
+repo = "EMPRESS"
