@@ -493,7 +493,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params) {
       const cwd = projectDir();
       const { collectPonytailDebt } = await import("../domain/ponytail.js");
-      const { rows, markers, noTrigger } = collectPonytailDebt(cwd);
+      const { rows, lines, noTrigger } = collectPonytailDebt(cwd);
       if (params?.persist !== false && rows.length) {
         const fs2 = await import("node:fs");
         const p = path.join(cwd, ".empress", "ponytail-debt.md");
@@ -501,7 +501,7 @@ export default function (pi: ExtensionAPI) {
           "# Ponytail debt ledger",
           `generated: ${new Date().toISOString()}`,
           "",
-          ...rows.map((r) => r.line),
+          ...lines,
           "",
           `${rows.length} markers, ${noTrigger} with no trigger.`,
           "",
@@ -509,7 +509,7 @@ export default function (pi: ExtensionAPI) {
         fs2.writeFileSync(p, body);
       }
       const text = rows.length
-        ? `${rows.map((r) => r.line).join("\n")}\n\n${rows.length} markers, ${noTrigger} with no trigger.`
+        ? `${lines.join("\n")}\n\n${rows.length} markers, ${noTrigger} with no trigger.`
         : "No ponytail: debt. Clean ledger.";
       return reply(text);
     },
