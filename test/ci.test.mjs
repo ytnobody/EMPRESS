@@ -3,7 +3,7 @@
 // dispatches/falls back correctly using an injected runner — no real container.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildContainerArgs, runCi, runProjectCi, nodeModulesExtraMount } from "../src/domain/ci.ts";
+import { buildContainerArgs, runCi, runProjectCi, nodeModulesExtraMount, depsRelinkRepair } from "../src/domain/ci.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -114,4 +114,101 @@ test("runCi: deps mount prepends the /project/node_modules relink", () => {
   const shIndex = shCall[1].lastIndexOf("sh");
   assert.equal(shCall[1][shIndex + 1], "-c");
   assert.equal(shCall[1][shIndex + 2], "rm -f /project/node_modules && ln -s /deps /project/node_modules && bun scripts/selfcheck.ts");
+});
+
+// ---------------------------------------------------------------------------
+// Task 05: self-healing of the deps-relink write-back. The container relink
+// (rm /project/node_modules && ln -s /deps ...) writes THROUGH the rw mount and
+// leaves the HOST worktree symlink pointing at /deps (realpath ENOENT on host).
+// Fix: depsRelinkRepair decides the rewrite target (pure decision), runCi applies
+// it before (so this run can mount) and after (so the invariant holds on return).
+// ---------------------------------------------------------------------------
+
+function makeWorktreeFixture(symlinkTarget) {
+  // layout: <base>/main/node_modules (real dir), <base>/main/.empress/worktrees/<n>
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ci-heal-"));
+  const main = path.join(base, "main");
+  const mainNm = path.join(main, "node_modules");
+  fs.mkdirSync(mainNm, { recursive: true });
+  const wt = path.join(main, ".empress", "worktrees", "9");
+  fs.mkdirSync(wt, { recursive: true });
+  if (symlinkTarget !== null) fs.symlinkSync(symlinkTarget, path.join(wt, "node_modules"), "dir");
+  return { base, main, mainNm, wt };
+}
+
+// Verifies: a symlink left pointing at /deps by a previous container relink is
+// recognized as poisoned, and the decided rewrite target is the main repo's real
+// node_modules dir (= <wt>/../../.. + /node_modules, the documented layout) —
+// derived from the layout spec, so a future implementation drift is caught.
+test("depsRelinkRepair: /deps-poisoned link -> main repo node_modules target", () => {
+  const { wt, mainNm } = makeWorktreeFixture("/deps");
+  assert.equal(depsRelinkRepair(wt), mainNm);
+});
+
+// Verifies: a healthy worktree link (target = main node_modules) needs no rewrite.
+test("depsRelinkRepair: valid symlink -> null (no rewrite)", () => {
+  const { wt, mainNm } = makeWorktreeFixture(null);
+  fs.symlinkSync(mainNm, path.join(wt, "node_modules"), "dir");
+  assert.equal(depsRelinkRepair(wt), null);
+});
+
+// Verifies: no symlink or a plain dir node_modules needs no rewrite.
+test("depsRelinkRepair: missing / plain node_modules -> null", () => {
+  const { base, wt } = makeWorktreeFixture(null);
+  assert.equal(depsRelinkRepair(wt), null);
+  fs.mkdirSync(path.join(wt, "node_modules"));
+  assert.equal(depsRelinkRepair(wt), null);
+  assert.equal(depsRelinkRepair(base), null);
+});
+
+// Verifies: poisoning is not rewritten to a fabricated target when the derived
+// main node_modules dir does not exist — leave the link alone (mount discovery
+// then degrades to [] as before).
+test("depsRelinkRepair: poisoned but main node_modules missing -> null", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ci-heal-"));
+  const wt = path.join(base, "main", ".empress", "worktrees", "9");
+  fs.mkdirSync(wt, { recursive: true });
+  fs.symlinkSync("/deps", path.join(wt, "node_modules"), "dir");
+  assert.equal(depsRelinkRepair(wt), null);
+});
+
+// Verifies (acceptance criterion, consecutive runs): a SECOND runCi call on a
+// worktree whose host symlink was poisoned by run #1 (fixture pre-set to /deps)
+// still resolves the mount and emits the relink-prefixed container command — i.e.
+// the pre-run heal restores mount discovery, so 'tsc not found' cannot recur.
+test("runCi: second consecutive run after poisoning still emits the deps relink", () => {
+  const { wt, mainNm } = makeWorktreeFixture("/deps");
+  const calls = [];
+  const _run = (c, a) => {
+    calls.push([c, a]);
+    return c === "podman" && a[0] === "--version" ? { code: 0 } : { code: 0, stdout: "", stderr: "" };
+  };
+  runCi(wt, { testCommand: "bun scripts/selfcheck.ts", engine: "podman", image: "oven/bun:1.4-alpine", _run });
+  const shCall = calls.find(([c, a]) => c === "podman" && a[0] === "run");
+  assert.ok(shCall, "container run was issued");
+  const shIndex = shCall[1].lastIndexOf("sh");
+  assert.equal(shCall[1][shIndex + 2], "rm -f /project/node_modules && ln -s /deps /project/node_modules && bun scripts/selfcheck.ts");
+  // and after this run the host link is healthy again (post-run heal)
+  assert.equal(fs.realpathSync(path.join(wt, "node_modules")), fs.realpathSync(mainNm));
+});
+
+// Verifies (acceptance criterion, host invariant): when a container run writes
+// /deps back through the rw mount mid-run (simulated by the injected runner),
+// runCi restores the HOST worktree symlink to the main repo's real node_modules
+// dir before returning — host selfcheck stays green between runs.
+test("runCi: post-run restore leaves host symlink resolving to main node_modules", () => {
+  const { wt, mainNm } = makeWorktreeFixture(null);
+  fs.symlinkSync(mainNm, path.join(wt, "node_modules"), "dir"); // healthy pre-state
+  const _run = (c, a) => {
+    if (c === "podman" && a[0] !== "--version") {
+      // simulate the container relink writing through the rw mount:
+      const nm = path.join(wt, "node_modules");
+      fs.rmSync(nm, { force: true });
+      fs.symlinkSync("/deps", nm, "dir");
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  runCi(wt, { testCommand: "bun scripts/selfcheck.ts", engine: "podman", image: "oven/bun:1.4-alpine", _run });
+  // the injected runner poisoned the host link mid-run; runCi must have restored it
+  assert.equal(fs.realpathSync(path.join(wt, "node_modules")), fs.realpathSync(mainNm));
 });
