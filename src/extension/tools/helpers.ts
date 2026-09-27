@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 
 import { loadConfig, resolveProjectRoot, type LoadedConfig } from "../../shared/config.ts";
-import { taskBrief, type Task } from "../../domain/tasks.ts";
+import { issueLang, taskBrief, type Task } from "../../domain/tasks.ts";
+
+const LANG_NAME: Record<string, string> = { ja: "Japanese", zh: "Chinese", ko: "Korean", en: "English" };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // The pi extension entry (src/extension/empress.ts), passed to spawned engineers.
@@ -42,7 +44,13 @@ export function spawnEngineer(projectCwd: string, task: Task, worktreePath: stri
   ];
   if (model) args.push("--model", model);
   if (fs.existsSync(engineerPrompt)) args.push("--append-system-prompt", engineerPrompt);
-  args.push(`Implement the following task for EMPRESS. Work inside the provided worktree, run the project test command, commit to the branch, and report back (task id, branch, what you did, test result).\n\n${taskBrief(task)}`);
+  // Issue-bound output (task comments, final report) matches the issue's
+  // language, with the [project] language as the default for the en/unknown slot.
+  const projectLang = loadConfig(projectCwd).project?.language || "en";
+  const lang = LANG_NAME[issueLang(task.title, task.body, projectLang)] || "English";
+  args.push(
+    `Implement the following task for EMPRESS. Work inside the provided worktree, run the project test command, commit to the branch, and report back (task id, branch, what you did, test result).\n\n${taskBrief(task)}\n\nLanguage: write all your task comments and your final report in ${lang} (resolved from this issue's language; [project] language = ${projectLang}).`
+  );
 
   return new Promise<SpawnResult>((resolve) => {
     const proc = spawn("pi", args, { cwd: worktreePath, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });

@@ -94,11 +94,17 @@ the loop before going live. The key fields:
    test_command = "bun scripts/selfcheck.ts"  # the "CI" gate run before a merge
    max_engineers = 3         # parallel Engineers spawned per pass
    loop_interval = 60        # idle-tick / wake cadence (seconds)
-   language = "en"           # issue language
+   language = "en"           # [project] language — default for pass reports, lessons, and
+                             # comments whose issue has no detectable language; issues detected
+                             # as Japanese/Chinese/Korean (ja/zh/ko) override it automatically
    ```
 
    `base_branch`, `test_command`, `max_engineers`, `loop_interval` and `language`
-   mirror the `empress init` prompts and can be passed as CLI flags
+   mirror the `empress init` prompts and can be passed as CLI flags. `language` is
+   the **`[project] language`** output default: every agent comment, pass/audit
+   report, and lesson matches the issue's detected language when it is a clear
+   `ja`/`zh`/`ko`, and falls back to this value for English/unknown issues and
+   repo-wide prose.
    (`empress init --base_branch main --test_command "…"`). For the optional
    `[ci]` container engine, per-role `[models]`, and `[github]` sections, see the
    [Configuration](#configuration-empresstoml) section below.

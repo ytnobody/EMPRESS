@@ -116,6 +116,8 @@ export function hasHumanReply(t: Task): boolean {
 /**
  * Best-effort language detection from issue text (Japanese / Chinese / Korean /
  * English). Used so proposal comments and the Q&A match the issue's language.
+ * The "en" result is ambiguous: a genuinely-English issue and any
+ * unrecognized-script text both land here — see resolveLang for the default.
  */
 export function detectLanguage(text: string): string {
   const t = text || "";
@@ -123,6 +125,27 @@ export function detectLanguage(text: string): string {
   if (/[\uac00-\ud7af]/.test(t)) return "ko";
   if (/[\u4e00-\u9fff]/.test(t)) return "zh"; // han
   return "en";
+}
+
+/**
+ * Effective output language for prose. A clear CJK detection (ja/zh/ko) is the
+ * issue language and always wins; the detector's ambiguous "en" slot (English
+ * issue OR unrecognized script OR no issue text at all) falls back to the
+ * `[project] language` — the config default ("en" when unset).
+ */
+// ponytail: detector's "en" conflates English with unknown scripts — [project]
+// language fills that slot; a script-level detector would separate them (ceiling),
+// add one if a non-en-default project starts receiving foreign-script issues.
+export function resolveLang(detected: string, projectLang: string): string {
+  return detected === "en" ? projectLang || "en" : detected;
+}
+
+/**
+ * Resolved output language for a task's issue-bound prose (comments, hearings,
+ * engineer reports): detected non-en issue language wins, else [project] language.
+ */
+export function issueLang(title: string, body: string, projectLang: string): string {
+  return resolveLang(detectLanguage(`${title || ""} ${body || ""}`), projectLang || "en");
 }
 
 /** Clarification strings keyed by language code (falls back to en). */
@@ -146,6 +169,53 @@ const PROPOSAL_L10N: Record<string, { purpose: (t: string) => string; scope: (t:
       "完了とみなす、テスト可能な受け入れ条件は何ですか？",
       "対象外（Non-Goals）にしたいことはありますか？",
     ],
+  },
+  zh: {
+    purpose: (t) => `应让系统实现「${t}」，以满足下列验收标准。`,
+    scope: (t) => `仅限为满足「${t}」的验收标准所需的变更。`,
+    acceptance: "（待回答下列问题后确定）",
+    questions: (t) => [
+      `「${t}」具体应做什么、为什么？（这是根据标题的推测——如有误请指正）`,
+      "视为完成的、可测试的验收标准是什么？",
+      "有没有希望明确排除在范围之外（Non-Goals）的事项？",
+    ],
+  },
+  ko: {
+    purpose: (t) => `시스템이「${t}」을(를) 실현할 수 있도록 아래 수락 기준을 충족해야 합니다.`,
+    scope: (t) => `「${t}」의 수락 기준을 충족하는 데 필요한 변경만으로 한정합니다.`,
+    acceptance: "（아래 질문에 답변한 후 확정）",
+    questions: (t) => [
+      `「${t}」은(는) 구체적으로 무엇을 해야 하며, 왜 그런가요？（제목에서 추측한 것입니다——틀리면 정정해 주세요）`,
+      "완료로 간주할 수 있는 테스트 가능한 수락 기준은 무엇인가요？",
+      "범위에서 명시적으로 제외하고 싶은 것（Non-Goals）이 있나요？",
+    ],
+  },
+};
+
+/**
+ * Per-language framing strings for the readiness hearing comment (the prose
+ * around the drafted proposal + open questions). Falls back to en by callers.
+ */
+export const CLARIFY_FRAME: Record<string, { header: string; proposed: string; questions: string }> = {
+  en: {
+    header: "**[empress]** This task looks under-specified. Here is a **draft spec I inferred from the title** — please **answer the open questions below** in a reply (or confirm / adjust):",
+    proposed: "**Proposed:**",
+    questions: "**Open questions:**",
+  },
+  ja: {
+    header: "**[empress]** このタスクは仕様が不足しています。タイトルから推測した**ドラフト仕様**です。以下の**未解決の質問**に**返信で回答**（または確認・修正）してください：",
+    proposed: "**提案（ドラフト）:**",
+    questions: "**未解決の質問:**",
+  },
+  zh: {
+    header: "**[empress]** 此任务的规格不足。这是根据标题推测的**草稿规格**——请在**回复中回答**以下**未解决的问题**（或确认/修正）：",
+    proposed: "**提案（草稿）:**",
+    questions: "**未解决的问题:**",
+  },
+  ko: {
+    header: "**[empress]** 이 작업은 사양이 부족합니다. 제목에서 추측한 **초안 사양**입니다. 아래 **미해결 질문**에 **답글로 답변**（또는 확인·수정）해 주세요：",
+    proposed: "**제안（초안）:**",
+    questions: "**미해결 질문:**",
   },
 };
 

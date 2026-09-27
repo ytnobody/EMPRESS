@@ -1,7 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { addComment, getTask, updateTask } from "../../domain/tasks.ts";
-import { checkReadiness, planClarifyProposals } from "../../domain/readiness.ts";
+import { addComment, CLARIFY_FRAME, getTask, issueLang, proposeSpec, updateTask } from "../../domain/tasks.ts";
+import { checkReadiness } from "../../domain/readiness.ts";
+
 import { cfg, projectDir, reply } from "./helpers.ts";
 
 export function register(pi: ExtensionAPI) {
@@ -18,13 +19,33 @@ export function register(pi: ExtensionAPI) {
       const verdict = await checkReadiness(cwd, config, t);
       if (verdict.needs_clarification) {
         // Proposal-based clarification: post a concrete draft spec + open questions
-        // (deduped by the shared planner — the run driver may already have posted it
-        // on first detection) so the human has something to respond to in comments,
-        // instead of a bare "please clarify". The Superintendent then drives the Q&A
-        // and, when resolved, rewrites the body via empress_apply_clarification.
-        const plans = planClarifyProposals([{ task: t, reasons: verdict.reasons }]);
-        if (plans.length) {
-          addComment(cwd, params.id, "empress", plans[0].comment);
+        // (deduped) so the human has something to respond to in comments, instead of
+        // a bare "please clarify". The Superintendent then drives the Q&A and, when
+        // resolved, rewrites the body via empress_apply_clarification.
+        const alreadyProposed = (t.comments || []).some((c) => String(c.body || "").includes("empress:clarify-proposal"));
+        if (!alreadyProposed) {
+          // Issue-bound comment: match the issue's detected language (en/ja/zh/ko), with
+          // the [project] language as the default for the ambiguous en/unknown slot.
+          const lang = issueLang(t.title, t.body, cfg().project?.language || "en");
+          const f = CLARIFY_FRAME[lang] || CLARIFY_FRAME.en;
+          const p = proposeSpec(t, lang);
+          const proposal = [
+            f.header,
+            "<!--empress:clarify-proposal-->",
+            "",
+            f.proposed,
+            `- Purpose: ${p.purpose}`,
+            `- Scope: ${p.scope}`,
+            `- Acceptance Criteria: ${p.acceptance.map((a) => `[ ] ${a}`).join(" ")}`,
+            `- Non-Goals: ${p.nongoals.join(", ")}`,
+            "",
+            f.questions,
+            ...p.questions.map((q, i) => `${i + 1}. ${q}`),
+            "",
+            `(reason: ${verdict.reasons.join("; ")})`,
+          ].join("\n");
+          addComment(cwd, params.id, "empress", proposal);
+
           updateTask(cwd, params.id, { needs_clarification: true, status: "blocked" });
           t.needs_clarification = true;
         }

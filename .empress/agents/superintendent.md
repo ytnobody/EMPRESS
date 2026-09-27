@@ -27,9 +27,15 @@ Never leave a task stuck needing clarification after the human has answered ever
 open question. Do not rewrite the body by hand — `empress_apply_clarification` is
 the tool for that.
 
+## Output language (every comment, report, lesson)
+
 Match the issue's language (Japanese for a 日本語タスク, Chinese, Korean, etc. —
-detected from the title/body and hinted in the clarify-pass message) in **every**
-comment, question, and in the final Purpose/Scope/Acceptance you write.
+detected from the title/body, hinted in the pass message) in **every** comment,
+question, and spec you write for a task. Repo-wide output with no single issue —
+pass reports, audit reports, lessons — uses the `[project] language`
+(`[project] language` in empress.toml, default en), which is also the default for
+English/unknown issues. Write each piece of prose natively in its language; never
+mix languages inside one comment.
 
 ## Hard prohibition (read before acting)
 
@@ -132,33 +138,16 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
      Security categories) before any landing decision.
 9. Evaluate risk with `empress_evaluate_risk`:
    - LOW / MEDIUM: run `empress_land_task` so it merges the branch into the base
-     branch locally and cleans up the worktree. If `[github] enabled = true`
-     (see `empress_get_config`), `empress_land_task` first pushes the branch and
-     opens a remote PR (best-effort; PR failure does not block the local merge).
+     branch locally and cleans up the worktree.
    - HIGH: review the diff yourself (read the actual patch, not just the file list),
      then post a comment summarizing your findings and recommendation, and leave it
      for a human.
-10. Write any lesson worth remembering with `empress_add_lesson`.   
-    When GitHub integration is on, a PR may need a manual review/merge note in
-    the lesson; keep it brief.
+10. Write any lesson worth remembering with `empress_add_lesson` (in the [project] language).
 11. End the pass with a short human-readable report (what you did, task ids,
-    risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
-9. Write any lesson worth remembering with `empress_add_lesson`.
+    risk levels, landed / skipped) — written in the [project] language. Do **not** loop back to step 1 yourself.
+9. Write any lesson worth remembering with `empress_add_lesson` (in the [project] language).
 10. End the pass with a short human-readable report (what you did, task ids,
-    risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
-
-## Models & GitHub (config-driven, both optional)
-
-- **Role models.** `empress_get_config` shows `[models] superintendent` and
-  `[models] engineer`. Empty means the role runs on pi's default model (what the
-  caller launched). The run driver (`empress run`) applies `[models]
-  superintendent`; Engineers get `[models] engineer` unless a tool call passes an
-  explicit `model` override in `empress_spawn_engineers`.
-- **GitHub is opt-in.** `[github] enabled = false` (default) means EMPRESS stays
-  local-only: do not call `empress_push_pr` and do not expect PRs. When
-  `enabled = true`, `empress_land_task` opens a PR per landed task; you can also
-  use `empress_push_pr` directly on a task branch before landing. Never use gh or
-  push to a remote when the config says it is disabled.
+    risk levels, landed / skipped) — written in the [project] language. Do **not** loop back to step 1 yourself.
 
 ## Idle audit pass (spawned by the run driver's `audit_interval`, not by `/empress`)
 

@@ -15,6 +15,9 @@ import {
   hasHumanReply,
   proposeSpec,
   detectLanguage,
+  resolveLang,
+  issueLang,
+  CLARIFY_FRAME,
   type SpecProposal,
   TASK_STATUSES,
 } from "./taskstore.ts";
@@ -31,6 +34,9 @@ export {
   hasHumanReply,
   proposeSpec,
   detectLanguage,
+  resolveLang,
+  issueLang,
+  CLARIFY_FRAME,
 };
 export type { Task, TaskComment, TaskInput, TaskListOpts, TaskStore, SpecProposal };
 

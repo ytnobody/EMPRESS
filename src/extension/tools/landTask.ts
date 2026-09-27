@@ -5,8 +5,9 @@ import { Type } from "typebox";
 import { runProjectCi } from "../../domain/ci.ts";
 import { landBranch, removeWorktree } from "../../domain/git.ts";
 import { pushBranchAndCreatePr } from "../../domain/github.ts";
-import { addComment, closeTask, getTask, updateTask } from "../../domain/tasks.ts";
+import { addComment, closeTask, getTask, updateTask, issueLang } from "../../domain/tasks.ts";
 import { addLesson } from "../../domain/lessons.ts";
+import { agentL10n } from "../../domain/l10n.ts";
 import { evaluateRisk } from "../../domain/risk.ts";
 import { cfg, projectDir, reply } from "./helpers.ts";
 
@@ -54,7 +55,9 @@ export function register(pi: ExtensionAPI) {
 
       const riskEval = await evaluateRisk(cwd, config, t);
       if (riskEval.level === "HIGH" && !params.force) {
-        addComment(cwd, params.id, "empress", `⚠️ HIGH risk — skipping auto-land. Reasons: ${riskEval.reasons.join("; ")}`);
+        // Issue-bound comment: match the issue's language (ja/zh/ko/en), [project] default.
+        const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
+        addComment(cwd, params.id, "empress", l.highRiskSkip(riskEval.reasons.join("; ")));
         return reply(JSON.stringify({ merged: false, reason: "HIGH risk", reasons: riskEval.reasons }));
       }
 
@@ -78,10 +81,12 @@ export function register(pi: ExtensionAPI) {
         );
         if (prRes.ok && prRes.prUrl) {
           updateTask(cwd, params.id, { pr: prRes.prUrl });
-          addComment(cwd, params.id, "empress", `PR opened: ${prRes.prUrl}`);
+          const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
+          addComment(cwd, params.id, "empress", l.prOpened(prRes.prUrl));
           replyBody.prUrl = prRes.prUrl;
         } else {
-          addComment(cwd, params.id, "empress", `PR step failed: ${prRes.error || "unknown"}`);
+          const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
+          addComment(cwd, params.id, "empress", l.prFailed(prRes.error || "unknown"));
           replyBody.prError = prRes.error || "PR creation failed";
         }
       }
@@ -89,9 +94,11 @@ export function register(pi: ExtensionAPI) {
       const res = landBranch(cwd, base, t.branch);
       Object.assign(replyBody, res);
       if (res.merged) {
-        closeTask(cwd, params.id, `Landed into ${base} (${res.note}).`);
+        // Comments are issue-bound; the auto-lesson is repo-bound ([project] language).
+        const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
+        closeTask(cwd, params.id, l.landedNote(base, res.note || ""));
         removeWorktree(cwd, params.id, t.branch);
-        addLesson(cwd, `After landing task #${params.id}, the result was ${riskEval.level} risk — ${riskEval.reasons.join("; ") || "no concerns"}.`);
+        addLesson(cwd, agentL10n(config.project?.language || "en").lessonAfterLand(params.id, riskEval.level, riskEval.reasons.join("; ")));
       }
       return reply(JSON.stringify(replyBody));
     },

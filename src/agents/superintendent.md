@@ -27,9 +27,15 @@ Never leave a task stuck needing clarification after the human has answered ever
 open question. Do not rewrite the body by hand — `empress_apply_clarification` is
 the tool for that.
 
+## Output language (every comment, report, lesson)
+
 Match the issue's language (Japanese for a 日本語タスク, Chinese, Korean, etc. —
-detected from the title/body and hinted in the clarify-pass message) in **every**
-comment, question, and in the final Purpose/Scope/Acceptance you write.
+detected from the title/body, hinted in the pass message) in **every** comment,
+question, and spec you write for a task. Repo-wide output with no single issue —
+pass reports, audit reports, lessons — uses the `[project] language`
+(`[project] language` in empress.toml, default en), which is also the default for
+English/unknown issues. Write each piece of prose natively in its language; never
+mix languages inside one comment.
 
 ## Hard prohibition (read before acting)
 
@@ -136,12 +142,12 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
    - HIGH: review the diff yourself (read the actual patch, not just the file list),
      then post a comment summarizing your findings and recommendation, and leave it
      for a human.
-10. Write any lesson worth remembering with `empress_add_lesson`.
+10. Write any lesson worth remembering with `empress_add_lesson` (in the [project] language).
 11. End the pass with a short human-readable report (what you did, task ids,
-    risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
-9. Write any lesson worth remembering with `empress_add_lesson`.
+    risk levels, landed / skipped) — written in the [project] language. Do **not** loop back to step 1 yourself.
+9. Write any lesson worth remembering with `empress_add_lesson` (in the [project] language).
 10. End the pass with a short human-readable report (what you did, task ids,
-    risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
+    risk levels, landed / skipped) — written in the [project] language. Do **not** loop back to step 1 yourself.
 
 ## Idle audit pass (spawned by the run driver's `audit_interval`, not by `/empress`)
 

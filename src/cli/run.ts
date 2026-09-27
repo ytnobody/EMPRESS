@@ -54,6 +54,22 @@ const FIX_MSG =
   "run the project test command to confirm, and commit the fix to the task's branch. " +
   "Do NOT land control-plane tasks — leave sign-off/merge to the human. Do not touch tasks not listed. Report what you fixed.";
 
+/**
+ * Language rule injected into every Superintendent pass (run / clarify / audit):
+ * issue-bound output matches the issue's detected language; repo-wide output
+ * (pass reports, audit reports, lessons) uses the `[project] language` default.
+ */
+function langInstruction(config: LoadedConfig): string {
+  const projectLang = (config.project?.language || "en").trim() || "en";
+  return (
+    "Language rule (apply to ALL your output — every comment, question, pass report, lesson): " +
+    "detect each issue's language from its title/body (ja = Japanese, zh = Chinese, ko = Korean; else English/unknown). " +
+    "Write issue-bound output in the detected language. " +
+    `Write repo-wide output (pass reports, audit reports, lessons) in the [project] language: ${projectLang}. ` +
+    "Do not translate mechanically; simply write each piece of prose in its language."
+  );
+}
+
 interface RunPassOptions {
   cwd: string;
   config: LoadedConfig;
@@ -78,15 +94,14 @@ function runPass({ cwd, config, model, thinking, audit = false, mode = "run", cl
   if (thinking) args.push("--thinking", thinking);
   if (config.project?.test_command) process.env.EMPRESS_TEST_COMMAND = config.project.test_command;
   args.push("--append-system-prompt", agentPrompt);
-  if (mode === "audit") args.push(AUDIT_MSG);
+  if (mode === "audit") args.push(`${AUDIT_MSG}\n\n${langInstruction(config)}`);
   else if (mode === "clarify") {
     const langHint = Object.entries(clarifyLang).length
       ? `Issue languages (detected) to match in ALL your comments/questions: ${Object.entries(clarifyLang).map(([id, l]) => `#${id}=${l}`).join(", ")}.`
       : "Respond in the language of each issue's title/body (detected: ja for Japanese, zh, ko, else en).";
-    args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}\n${langHint}`);
+    args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}\n${langInstruction(config)}${langHint ? `\n${langHint}` : ""}`);
   } else if (mode === "fix") args.push(`${FIX_MSG}\n\nTasks to FIX (ids): ${clarificationIds.join(", ") || "<none>"}`);
-  else args.push(SUPER_MSG);
-
+  else args.push(`${SUPER_MSG}\n\n${langInstruction(config)}`);
   return new Promise((resolve) => {
     const proc = spawn("pi", args, { cwd, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
@@ -370,6 +385,7 @@ export async function runLoop(
           );
         }
         if (readyIds.length > 0) {
+
           pass++;
           const started = new Date().toISOString();
           console.log(`\n--- pass ${pass} (${started}) ready: #${readyIds.join(", #")} ---`);
