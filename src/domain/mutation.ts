@@ -34,11 +34,8 @@ function swapAll(source: string, pairs: Array<[string, string]>): Mutant[] {
   const out: Mutant[] = [];
   for (const [a, b] of pairs) {
     if (source.includes(a)) {
-      let n = 0;
       const swapped = source.split(a).join(b);
       out.push({ id: `${a.trim()}->${b.trim()}`, source: swapped });
-      n += 1;
-      void n;
     }
   }
   return out;
