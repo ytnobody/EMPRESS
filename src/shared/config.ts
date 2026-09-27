@@ -30,7 +30,7 @@ export interface Config {
   jev: { model: string };
   ci: { engine: string; image: string; network: string };
   notification: { webhook_url: string; type: string };
-  run: { failure_notify_threshold: number; wake_interval: number; audit_interval: number; pass_timeout: number };
+  run: { failure_notify_threshold: number; wake_interval: number; audit_interval: number; pass_timeout: number; pass_stall_seconds: number };
   mutation: { enabled: boolean; min_score: number; max_files: number; max_mutants: number };
 }
 
@@ -89,7 +89,8 @@ export const DEFAULTS: Config = {
     failure_notify_threshold: 3,
     wake_interval: 60,     // fs-poll cadence (seconds); zero-LLM — event detection only
     audit_interval: 3600,  // idle self-audit LLM cadence (seconds); 0 = disabled
-    pass_timeout: 1800,    // per-pass wall-clock cap (seconds); kills a stalled pass so the loop can't hang forever
+    pass_timeout: 600,     // per-pass absolute wall-clock cap (seconds); kills a pass that won't exit
+    pass_stall_seconds: 300, // activity threshold (seconds); kills a live-but-silent pass well before pass_timeout
   },
   // Mutation-testing + Jev weak-test gate. OFF by default: deterministic weak-test
   // detection on changed code (surviving mutants) classified by Jev as equivalent
