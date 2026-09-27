@@ -129,7 +129,12 @@ function conflictRepo() {
   return dir;
 }
 
-test("mergeConflict: true for diverging same-line changes, false for additive branch", () => {
+test("mergeConflict: true for diverging same-line changes, false for additive branch", (t) => {
+  if (!gitAvailable()) {
+    // git absent (e.g. CI container): fixture can't be built -> skip the spec.
+    t.skip("git not available in this environment");
+    return;
+  }
   const dir = conflictRepo();
   try {
     assert.equal(mergeConflict(dir, "develop", "branch-b"), true, "branch-b should conflict with develop");

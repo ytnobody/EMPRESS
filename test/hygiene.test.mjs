@@ -16,7 +16,17 @@ function repo() {
   return dir;
 }
 
-test("hygiene: treeHygieneViolations flags a force-added gitignored path", () => {
+function gitAvailable() {
+  try {
+    execFileSync("git", ["--version"], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("hygiene: treeHygieneViolations flags a force-added gitignored path", (t) => {
+  if (!gitAvailable()) { t.skip("git not available in this environment"); return; }
   const dir = repo();
   try {
     fs.mkdirSync(path.join(dir, "node_modules"));
@@ -30,7 +40,8 @@ test("hygiene: treeHygieneViolations flags a force-added gitignored path", () =>
   }
 });
 
-test("hygiene: treeHygieneViolations is empty on a clean tree", () => {
+test("hygiene: treeHygieneViolations is empty on a clean tree", (t) => {
+  if (!gitAvailable()) { t.skip("git not available in this environment"); return; }
   const dir = repo();
   try {
     fs.writeFileSync(path.join(dir, "src.ts"), "export const a=1;\n");
@@ -41,7 +52,8 @@ test("hygiene: treeHygieneViolations is empty on a clean tree", () => {
   }
 });
 
-test("hygiene: isGitignored matches BOTH a real dir and a same-named symlink", () => {
+test("hygiene: isGitignored matches BOTH a real dir and a same-named symlink", (t) => {
+  if (!gitAvailable()) { t.skip("git not available in this environment"); return; }
   const dir = repo();
   try {
     // real directory
