@@ -247,8 +247,11 @@ test("decidePreflight: git-absent or deps-unhealthy => skipEligible", () => {
 });
 
 // Verifies: nodeModulesHealthy returns true for a symlink resolving to a real
-// dir, and false for a poisoned /deps link (realpath ENOENT) or missing name.
-test("nodeModulesHealthy: resolvable link true, /deps-poisoned/missing false", () => {
+// dir, and false for a symlink to a nonexistent target (realpath ENOENT) or a
+// missing name. The broken target is environment-independent (a unique missing
+// absolute path, NOT the literal /deps, which resolves to a real directory
+// inside the podman gate container where deps are mounted ro).
+test("nodeModulesHealthy: resolvable link true, broken-target/missing false", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "ci-pf-"));
   const mainNm = path.join(base, "main");
   fs.mkdirSync(mainNm, { recursive: true });
@@ -257,9 +260,9 @@ test("nodeModulesHealthy: resolvable link true, /deps-poisoned/missing false", (
   // healthy symlink -> real dir
   fs.symlinkSync(mainNm, path.join(wt, "node_modules"), "dir");
   assert.equal(nodeModulesHealthy(wt), true);
-  // poisoned /deps link -> false
+  // broken link (ENOENT target) -> false
   fs.rmSync(path.join(wt, "node_modules"));
-  fs.symlinkSync("/deps", path.join(wt, "node_modules"), "dir");
+  fs.symlinkSync(path.join(base, "missing-target"), path.join(wt, "node_modules"), "dir");
   assert.equal(nodeModulesHealthy(wt), false);
   // missing -> false
   fs.rmSync(path.join(wt, "node_modules"));
