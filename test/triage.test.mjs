@@ -18,6 +18,37 @@ test("scanDiff: clean diff -> no findings", () => {
   assert.deepEqual(scanDiff("+export function f(a){ return a + 1; }"), { secrets: [], dangerous: [] });
 });
 
+// Verifies: bare words input/req/body/request in a diff line (comment or plain
+// identifier) do NOT flag deserialization — the pattern must only fire on an
+// actual deserialization call reading untrusted input, not on the bare words
+// themselves (ungrouped-alternation FP, lessons #94/#97).
+test("scanDiff: bare body/input/request/req words do not flag deserialization", () => {
+  for (const line of [
+    "+// reads the request body below",
+    "+// just a comment mentioning input",
+    "+const input = getConfig();",
+    "+let body;",
+    "+// req handled by middleware",
+  ]) {
+    assert.ok(!scanDiff(line).dangerous.includes("deserialization"), `unexpected flag for: ${line}`);
+  }
+});
+
+// Verifies: real untrusted-input deserialization calls (JSON.parse of
+// request.body / input / body, plus the deserialize/pickle.loads variants of
+// the same call posture) still flag deserialization after the FP fix.
+test("scanDiff: deserialization calls on untrusted input still flag", () => {
+  for (const line of [
+    "+const x = JSON.parse(request.body);",
+    "+const x = JSON.parse(input);",
+    "+const x = JSON.parse(body);",
+    "+deserialize(body);",
+    "+const d = pickle.loads(req_data);",
+  ]) {
+    assert.ok(scanDiff(line).dangerous.includes("deserialization"), `missed flag for: ${line}`);
+  }
+});
+
 // Verifies: SSRF to cloud metadata / internal hosts is flagged as dangerous.
 test("scanDiff: flags SSRF to internal/http hosts", () => {
   const bad = scanDiff('+const res = await fetch("http://169.254.169.254/latest/meta-data");\n+axios.get("http://localhost:3000/admin");\n+fetch("http://192.168.1.10/api");\n');
