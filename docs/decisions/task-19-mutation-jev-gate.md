@@ -16,19 +16,31 @@ is:
 
 ## Shape
 - **`src/domain/mutation.ts`** — pure, bun-native (Stryker has no bun-test plugin):
-  - `collectMutants(source)` — small safe text mutations (relational/equality
-    `===↔!==`, `<↔>=`, `&&↔||`, `true↔false`, numeric-literal bump), capped. Applied
-    to *behavior-bearing source*, not tests.
+  - `collectMutants(source, maxMutants?)` — small safe text mutations
+    (relational/equality flips both directions, `&&↔||`, `==↔===` strictness,
+    `==↔!=`, `+↔-`, `null↔undefined`, `Math.min↔Math.max`, `true↔false`,
+    numeric-literal bump). Token-aware swap: composite operators (`===`, `++`,
+    `+=`, `>=`, `&&=`) are never split; word tokens match at word boundaries;
+    tokens inside comments are never mutated (behavior-neutral noise).
+    The cap comes from `[mutation] max_mutants`. Applied to *behavior-bearing
+    source*, not tests.
   - `findTests(cwd)` — map each `src/*.ts` -> its `test/*.test.mjs` via import-scan.
   - `mutationTargets(...)` — changed `src/*.ts` that have tests, bounded.
-  - `runMutations({cwd, relSrc, test, _run})` — mutate-in-place with try/finally
-    restore (so the real file is always restored), run `bun test <test>`, count
-    killed vs survivors.
+  - `runMutations({cwd, relSrc, test, _run, maxMutants})` — mutate-in-place with
+    try/finally restore (so the real file is always restored), run `bun test
+    <test>`, count killed vs survivors.
+  - `runMutationGate(cwd, changed, opts)` — shared orchestration (changed
+    files → mutation → survivor classification → verdict) used by BOTH the tool
+    and the optional CI job, so the two gates can never drift.
 - **`src/extension/empress.ts`** — `empress_check_mutation({id})` tool (like
   `empress_vuln_check`): changed files of the task branch → mutation → Jev-classify
   survivors → verdict.
 - **`src/shared/config.ts` + `empress.toml`** — `[mutation] enabled / min_score
-  / scope / max_files / max_mutants`.
+  / scope / max_files / max_mutants` (max_mutants wired into the mutant cap).
+- **`.github/workflows/mutation.yml` + `scripts/mutation-gate.ts`** — optional CI
+  mirror of the gate: changed-branch scope, capped (`--max-files 1
+  --max-mutants 12`), reports score + survivors + Jev genuine-gap count. Delete the
+  workflow file (or `enabled=false`) to turn it off.
 - **Fallback**: Jev unavailable (no TYPESAFE_API_KEY) → use `min_score` threshold
   + existing LLM review.
 
