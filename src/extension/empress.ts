@@ -24,6 +24,7 @@ import { register as registerTaskComment } from "./tools/taskComment.ts";
 import { register as registerCloseTask } from "./tools/closeTask.ts";
 import { register as registerVulnCheck } from "./tools/vulnCheck.ts";
 import { register as registerTriageReview } from "./tools/triageReview.ts";
+import { register as registerCheckMutation } from "./tools/checkMutation.ts";
 import { register as registerAuditScan } from "./tools/auditScan.ts";
 import { register as registerPonytailDebt } from "./tools/ponytailDebt.ts";
 import { register as registerListBranches } from "./tools/listBranches.ts";
@@ -51,6 +52,7 @@ export default function (pi: ExtensionAPI) {
   registerCloseTask(pi);
   registerVulnCheck(pi);
   registerTriageReview(pi);
+  registerCheckMutation(pi);
   registerAuditScan(pi);
   registerPonytailDebt(pi);
   registerListBranches(pi);

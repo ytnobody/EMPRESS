@@ -79,6 +79,11 @@ As Superintendent:
   `cors/csrf`/`config`/`dep`/`opsec`) one line per finding: `<tag>: <loc>
   <issue>. <fix>. [高/中/低]`. **HIGH or trust-boundary findings hold the
   landing** for a human — never land them, even with `force`.
+- **Run the mutation gate during review** when `[mutation] enabled=true`: call
+  `empress_check_mutation` for the task and REPORT the mutation score and the
+  Jev survivor classification in your pass report. When it returns `ok:false`
+  with a low score or genuine-gap survivors, hold the landing for review (do not
+  force-past); equivalent mutants alone are not a blocker.
 - **Track deferred debt.** Periodically run `empress_ponytail_debt` to harvest
   `ponytail:` markers into `.empress/ponytail-debt.md`, flagging any with no
   upgrade path as `no-trigger` (those silently rot).
