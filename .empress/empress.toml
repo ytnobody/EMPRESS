@@ -61,3 +61,10 @@ audit_interval = 1800
 enabled = true
 owner = "ytnobody"
 repo = "EMPRESS"
+
+# Mutation-testing + Jev weak-test gate. OFF by default; on changed code with tests.
+[mutation]
+enabled = false
+min_score = 0.8
+max_files = 3
+max_mutants = 60
