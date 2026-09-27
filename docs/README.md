@@ -5,6 +5,8 @@ Central documentation directory.
 - **`architecture.md`** — the system design: philosophy, architecture, task
   store, Jev/risk integration, Superintendent & Engineer roles, lifecycle
   (was the root `DESIGN.md`).
+- **`release.md`** — the **manual** release procedure (merge `develop` → `main`,
+  tag `v0.1.0`, create a GitHub Release). Not automated by design.
 - **`decisions/`** — design decision records for individual features/changes
   (what/why + behavior spec, not implementation-tracing).
 

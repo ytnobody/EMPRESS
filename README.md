@@ -186,6 +186,10 @@ Supported flags:
 
 Long unattended runs: put `empress run` under systemd (user service) or tmux.
 
+**Releases.** Cutting a release (merge `develop` → `main`, tag, GitHub Release) is
+a **manual** procedure — see **[`docs/release.md`](docs/release.md)**. It is not
+automated.
+
 **Cost model.** `empress run` is event-driven, cheapest-first: a zero-LLM fs
 poll (60s) wakes only when the task queue changes; a preflight readiness check
 (deterministic + ONE Jev batch call) spawns the LLM only when a task is actually
