@@ -19,6 +19,7 @@ import { tasksHash } from "../domain/wake.ts";
 import { listTasks, getTask, addComment, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
 import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON, postClarifyProposals } from "../domain/readiness.ts";
 import { mergeConflict } from "../domain/git.ts";
+import { run } from "../shared/shell.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(__dirname, "..", "extension", "empress.ts");
@@ -47,12 +48,18 @@ const CLARIFY_MSG =
   "**rewrite the issue body once with the resolved Purpose/Scope/Acceptance/Non-Goals via `empress_apply_clarification`** (which clears needs_clarification). " +
   "Do not spawn Engineers or land anything in this pass. End with a short report of what you asked / clarified.";
 
+const FIX_MSG =
+  "You are the EMPRESS Superintendent running a HELD-TASK FIX pass. The listed tasks are held but their branch is REGRESSED (failing CI or a merge conflict against the base). " +
+  "For each listed task id, RE-ENGAGE its Engineer to FIX the specific defect (resolve the failing test / CI check, or rebase + resolve the merge conflict against the base branch) in the task worktree, " +
+  "run the project test command to confirm, and commit the fix to the task's branch. " +
+  "Do NOT land control-plane tasks — leave sign-off/merge to the human. Do not touch tasks not listed. Report what you fixed.";
+
 interface RunPassOptions {
   cwd: string;
   config: LoadedConfig;
   model?: string;
   thinking?: string;
-  mode?: "run" | "audit" | "clarify";
+  mode?: "run" | "audit" | "clarify" | "fix";
   audit?: boolean;
   clarificationIds?: number[];
   clarifyLang?: Record<number, string>;
@@ -77,7 +84,8 @@ function runPass({ cwd, config, model, thinking, audit = false, mode = "run", cl
       ? `Issue languages (detected) to match in ALL your comments/questions: ${Object.entries(clarifyLang).map(([id, l]) => `#${id}=${l}`).join(", ")}.`
       : "Respond in the language of each issue's title/body (detected: ja for Japanese, zh, ko, else en).";
     args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}\n${langHint}`);
-  } else args.push(SUPER_MSG);
+  } else if (mode === "fix") args.push(`${FIX_MSG}\n\nTasks to FIX (ids): ${clarificationIds.join(", ") || "<none>"}`);
+  else args.push(SUPER_MSG);
 
   return new Promise((resolve) => {
     const proc = spawn("pi", args, { cwd, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
@@ -189,6 +197,61 @@ function escalateConflictedHeld(cwd: string, config: LoadedConfig): void {
       /* skip */
     }
   }
+}
+
+function hasMarker(t: Task, marker: string): boolean {
+  return (t.comments || []).some((c) => String(c.body || "").includes(marker));
+}
+
+function fixAttempts(t: Task): number {
+  return (t.comments || []).filter((c) => String(c.body || "").includes("empress:fix-attempt")).length;
+}
+
+/** LLM-free: whether the task's open PR has a failing check (gh pr checks exit != 0). */
+function branchPrCiFailing(branch: string): boolean {
+  const list = run("gh", ["pr", "list", "--head", branch, "--json", "number,state"]);
+  if (list.code !== 0) return false;
+  try {
+    const prs = JSON.parse(list.stdout) as { number: number; state: string }[];
+    for (const pr of prs) {
+      if (pr.state !== "OPEN") continue;
+      const ch = run("gh", ["pr", "checks", String(pr.number)]);
+      return ch.code !== 0; // non-zero => at least one check failing
+    }
+  } catch {
+    /* unparseable */
+  }
+  return false;
+}
+
+/**
+ * Resilience R1-R4: LLM-free held-task regression detection. Returns ids of open
+ * tasks whose branch is broken (merge conflict with base OR failing CI) and are
+ * within their fix-attempt budget; after MAX attempts (or no branch/PR to fix) it
+ * escalates to a human instead. Detection is LLM-free; the FIX pass (Engineer) is LLM.
+ */
+function heldFixCandidates(cwd: string, config: LoadedConfig): number[] {
+  const base = config.project?.base_branch || "develop";
+  const MAX = 3;
+  const out: number[] = [];
+  for (const t of listTasks(cwd, { includeAll: true })) {
+    if (t.status === "done" || !t.branch) continue;
+    try {
+      const broken = mergeConflict(cwd, base, t.branch) || branchPrCiFailing(t.branch);
+      if (!broken) continue;
+      const attempts = fixAttempts(t);
+      if (attempts >= MAX) {
+        if (!hasMarker(t, "empress:fix-escalated")) {
+          addComment(cwd, t.id, "empress", `**[empress]** Held task unrecoverable: branch still regressed after ${attempts} fix attempts. Needs a HUMAN — merge/fix or abandon.\n<!--empress:fix-escalated-->`);
+        }
+        continue;
+      }
+      out.push(t.id);
+    } catch {
+      /* skip */
+    }
+  }
+  return out;
 }
 
 export async function runLoop(
@@ -339,11 +402,24 @@ export async function runLoop(
       lastAuditAt = Date.now();
       // LLM-free held-stall escalation on the audit cadence (Task #52).
       escalateConflictedHeld(cwd, config);
+      // Resilience R1-R4: a regressed held task (failing CI / conflict) gets a
+      // targeted FIX pass (bounded, escalates after MAX) instead of verify-and-hold.
+      const fixIds = heldFixCandidates(cwd, config);
       pass++;
       const started = new Date().toISOString();
-      console.log(`\n--- audit pass ${pass} (${started}) ---`);
-      const res = await runPass({ cwd, config, model: superModel, thinking, mode: "audit" });
-      await handleResult(cwd, res, started, pass, config);
+      if (fixIds.length) {
+        console.log(`\n--- fix pass ${pass} (${started}) fix: #${fixIds.join(", #")} ---`);
+        const f = await runPass({ cwd, config, model: superModel, thinking, mode: "fix", clarificationIds: fixIds });
+        await handleResult(cwd, f, started, pass, config);
+        for (const id of fixIds) {
+          const cur = getTask(cwd, id);
+          addComment(cwd, id, "empress", `**[empress]** fix attempt #${(cur ? fixAttempts(cur) : 0) + 1}\n<!--empress:fix-attempt-->`);
+        }
+      } else {
+        console.log(`\n--- audit pass ${pass} (${started}) ---`);
+        const res = await runPass({ cwd, config, model: superModel, thinking, mode: "audit" });
+        await handleResult(cwd, res, started, pass, config);
+      }
     }
 
     await sleepFor(wakeMs);
