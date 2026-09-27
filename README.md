@@ -194,7 +194,10 @@ automated.
 poll (60s) wakes only when the task queue changes; a preflight readiness check
 (deterministic + ONE Jev batch call) spawns the LLM only when a task is actually
 ready; an idle self-audit LLM runs on `[run] audit_interval` (3600s, 0 = off)
-and files findings as tasks. An idle queue costs ~zero.
+and files findings as tasks. An idle queue costs ~zero. Stalled passes recover
+fast: a pass whose pi child is alive but silent for `[run] pass_stall_seconds`
+(300s, default) is killed, and `[run] pass_timeout` (600s, default) caps any
+pass that keeps talking; both are configurable.
 
 ## How it works
 

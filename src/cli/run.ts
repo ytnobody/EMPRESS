@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadConfig, type LoadedConfig } from "../shared/config.ts";
+import { shouldStallKill } from "../domain/stall.ts";
 import { readLoopState, patchLoopState, type LoopStatePatch } from "./state.ts";
 import { tasksHash } from "../domain/wake.ts";
 import { listTasks, getTask, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
@@ -81,28 +82,59 @@ function runPass({ cwd, config, model, thinking, audit = false, mode = "run", cl
     const proc = spawn("pi", args, { cwd, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let err = "";
-    // Stall guard: a Superintendent/Engineer pass must not hang the loop forever.
-    // If the child hasn't exited within pass_timeout we SIGKILL it and resolve as
-    // a failed (stalled) pass; the loop's next wake then retries the queue.
-    const timeoutMs = Math.max(1, Number(config.run?.pass_timeout ?? 1800)) * 1000;
-    const timer = setTimeout(() => {
+
+    let settled = false;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    // Single settle path: whichever guard fires first wins; later guards are no-ops.
+    const settle = (code: number, note?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (stallTimer) clearTimeout(stallTimer);
+      resolve({ code, out, err: note ? `${err}\n${note}` : err });
+    };
+
+    // Absolute wall-clock cap: no matter what, a pass must not hang the loop
+    // forever (e.g. an always-talking-but-spinning pass).
+    const timeoutMs = Math.max(1, Number(config.run?.pass_timeout ?? 600)) * 1000;
+    const timeoutTimer = setTimeout(() => {
       try {
         proc.kill("SIGKILL");
       } catch {
         /* already gone */
       }
-      resolve({ code: -1, out, err: `${err}\n[empress] pass stalled: no exit within ${timeoutMs / 1000}s — killed; loop continues on next wake.` });
+      settle(-1, `[empress] pass stalled: no exit within ${timeoutMs / 1000}s — killed; loop continues on next wake.`);
     }, timeoutMs);
-    proc.stdout.on("data", (d) => (out += d.toString()));
-    proc.stderr.on("data", (d) => (err += d.toString()));
-    proc.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? -1, out, err });
-    });
-    proc.on("error", (e) => {
-      clearTimeout(timer);
-      resolve({ code: -1, out, err: String(e.message) });
-    });
+
+    // Activity watchdog: distinguishes "slow but working" (child alive, producing
+    // output) from "stalled" (child alive yet silent for the whole stall window).
+    // Debounce timer re-armed on every output; the kill decision is delegated to
+    // the pure shouldStallKill.
+    // ponytail: I/O-activity only (no CPU/proc accounting) — a pass that spins CPU
+    // with zero output is caught only by pass_timeout; add per-pid/cpu sampling of
+    // the child if that case ever matters.
+    const stallMs = Math.max(1, Number(config.run?.pass_stall_seconds ?? 300)) * 1000;
+    let lastActivityAt = Date.now();
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (shouldStallKill({ childAlive: proc.exitCode === null, lastActivityAt, now: Date.now(), stallMs })) {
+          try {
+            proc.kill("SIGKILL");
+          } catch {
+            /* already gone */
+          }
+          settle(-1, `[empress] pass stalled: no child-process/output activity within ${stallMs / 1000}s — killed; loop continues on next wake.`);
+        }
+      }, stallMs);
+    };
+
+    const onActivity = (d: string) => (lastActivityAt = Date.now(), armStall(), d);
+    proc.stdout.on("data", (d) => (out += onActivity(d.toString())));
+    proc.stderr.on("data", (d) => (err += onActivity(d.toString())));
+    proc.on("close", (code) => settle(code ?? -1));
+    proc.on("error", (e) => settle(-1, String(e.message)));
+    armStall();
   });
 }
 
