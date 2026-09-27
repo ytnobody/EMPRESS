@@ -18,6 +18,7 @@ export function readTaskFile(file: string): Task {
   return {
     id,
     file,
+    kind: "local", // file tasks can never be GitHub PRs — always labeled "task #N"
     title: String(frontmatter.title ?? ""),
     status: TASK_STATUSES.includes(frontmatter.status as string)
       ? (frontmatter.status as string)

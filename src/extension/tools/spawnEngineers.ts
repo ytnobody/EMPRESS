@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { getTask, type Task } from "../../domain/tasks.ts";
+import { getTask, taskRef, type Task } from "../../domain/tasks.ts";
 import { cfg, mapLimit, projectDir, reply, spawnEngineer } from "./helpers.ts";
 
 export function register(pi: ExtensionAPI) {
@@ -30,8 +30,10 @@ export function register(pi: ExtensionAPI) {
         const worktreePath = fs.existsSync(wt) ? wt : undefined;
         return spawnEngineer(cwd, t, worktreePath, { model: engineerModel, maxConcurrent: cap });
       });
-      const summary = results.map((r) => `#${r.task}: exit=${r.code} ${r.code === 0 ? "ok" : "FAILED"}`).join("\n");
-      return reply(`${summary}\n\n${results.map((r) => `#${r.task}\n${r.err ? "stderr: " + r.err + "\n" : ""}${r.report}`).join("\n\n")}`);
+      // Label each number (issue #N / PR #N / task #N) — never a bare #N.
+      const ref = (id: number) => taskRef(tasks.find((t) => t.id === id) ?? { id });
+      const summary = results.map((r) => `${ref(r.task)}: exit=${r.code} ${r.code === 0 ? "ok" : "FAILED"}`).join("\n");
+      return reply(`${summary}\n\n${results.map((r) => `${ref(r.task)}\n${r.err ? "stderr: " + r.err + "\n" : ""}${r.report}`).join("\n\n")}`);
     },
   });
 }

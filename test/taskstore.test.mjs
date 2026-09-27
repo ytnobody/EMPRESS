@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, agentMarker, proposeSpec, detectLanguage, resolveLang, issueLang, CLARIFY_FRAME } from "../src/domain/taskstore.js";
+import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, agentMarker, proposeSpec, detectLanguage, resolveLang, issueLang, CLARIFY_FRAME, taskBrief, taskRef, findTitleDuplicate, titlesNearMatch, normalizeTitle } from "../src/domain/taskstore.js";
+
 import { addComment, updateTask, getTask, closeTask, listTasks, removeTask } from "../src/domain/tasks.js";
 import { DEFAULTS } from "../src/shared/config.js";
 
@@ -12,23 +13,35 @@ function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "empress-ts-"));
 }
 
-// A fake `run` that emulates a tiny GitHub, recording invocations.
-function makeFakeDeps(calls) {
+// A fake `run` that emulates a tiny GitHub, recording invocations. `issues`
+// maps number -> the NORMALIZED issue JSON that fetchIssue's `gh api --jq`
+// produces (fields: number,title,state,body,createdAt,labels,pull_request).
+// An absent number is a 404 (fetchIssue -> null).
+function makeFakeDeps(calls, issues = { 1: ghIssue(1, { title: "gh task" }) }) {
   const run = (_cmd, args) => {
     calls.push([_cmd, ...args]);
     if (_cmd === "gh" && args[0] === "--version") return { code: 0, stdout: "", stderr: "", signal: null };
     if (_cmd === "gh" && args[0] === "issue" && args[1] === "create") {
       return { code: 0, stdout: "https://github.com/ytnobody/EMPRESS/issues/1\n", stderr: "", signal: null };
     }
-    if (_cmd === "gh" && args[0] === "issue" && args[1] === "view") {
-      return { code: 0, stdout: JSON.stringify({ number: 1, title: "gh task", state: "open", createdAt: "x", body: "body", labels: [] }), stderr: "", signal: null };
+    // fetchIssue: gh api repos/ytnobody/EMPRESS/issues/N --jq {...}
+    if (_cmd === "gh" && args[0] === "api" && args[2] === "--jq") {
+      const m = /\/issues\/(\d+)$/.exec(args[1]);
+      const n = m ? Number(m[1]) : NaN;
+      if (issues[n] !== undefined) return { code: 0, stdout: JSON.stringify(issues[n]), stderr: "", signal: null };
+      return { code: 1, stdout: "", stderr: "HTTP 404: Not Found", signal: null };
     }
     if (_cmd === "gh" && args[0] === "issue" && args[1] === "list") {
-      return { code: 0, stdout: JSON.stringify([{ number: 1, title: "gh task", state: "open", createdAt: "x", body: "body", labels: [] }]), stderr: "", signal: null };
+      const arr = Object.values(issues).filter((i) => !i.pull_request);
+      return { code: 0, stdout: JSON.stringify(arr), stderr: "", signal: null };
     }
     return { code: 0, stdout: "[]", stderr: "", signal: null };
   };
   return { storeDeps: { run } };
+}
+
+function ghIssue(n, over = {}) {
+  return { number: n, title: `task ${n}`, state: "open", createdAt: "x", body: "body", labels: [], ...over };
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +107,120 @@ test("taskstore: closed issue maps to done regardless of labels", () => {
 test("taskstore: no status labels + no assignee => open", () => {
   const t = issueToTask({ number: 2, title: "y", state: "open", createdAt: "", body: "", labels: [] }, "o/r");
   assert.equal(t.status, "open");
+});
+
+// Verifies: an issue whose GitHub JSON carries a pull_request marker is mapped
+// to kind "pr" (the #14-mis-identification vector), a plain issue to "issue".
+// `issue view N` returns PRs too — the kind must come from the API's
+// pull_request field, never from the number alone.
+test("taskstore: issueToTask labels a PR vs an issue by the pull_request field", () => {
+  const pr = issueToTask({ number: 14, title: "Some PR", state: "open", createdAt: "x", body: "b", labels: [], pull_request: true }, "o/r");
+  assert.equal(pr.kind, "pr");
+  assert.equal(pr.id, 14); // same numbering slot, now disambiguated
+  const issue = issueToTask({ number: 37, title: "An issue", state: "open", createdAt: "x", body: "b", labels: [] }, "o/r");
+  assert.equal(issue.kind, "issue");
+});
+
+// Verifies: taskRef is the single number-labeler — "PR #N"/"issue #N" for
+// gh-backed entities, "task #N" (never a bare #N) for local/unknown.
+test("taskstore: taskRef labels every number as PR/issue/task — never bare", () => {
+  assert.equal(taskRef({ id: 14, kind: "pr" }), "PR #14");
+  assert.equal(taskRef({ id: 37, kind: "issue" }), "issue #37");
+  assert.equal(taskRef({ id: 5, kind: "local" }), "task #5");
+  assert.equal(taskRef({ id: 5 }), "task #5"); // no kind -> local-style, still labeled
+});
+
+// Verifies: taskBrief (the empress_get_task payload) starts with the labeled
+// reference, so a PR number can never be reported as a bare task number.
+test("taskstore: taskBrief leads with the labeled reference", () => {
+  const b = taskBrief(issueToTask({ number: 14, title: "X", state: "open", createdAt: "x", body: "body text", labels: [], pull_request: true }, "o/r"));
+  assert.ok(b.startsWith("PR #14: X"));
+  const bi = taskBrief(issueToTask({ number: 37, title: "Y", state: "open", createdAt: "x", body: "body text", labels: [] }, "o/r"));
+  assert.ok(bi.startsWith("issue #37: Y"));
+});
+
+// ---------------------------------------------------------------------------
+// Title near-match dedupe (pure)
+// ---------------------------------------------------------------------------
+// Verifies: normalization is case/punctuation/whitespace-insensitive so the
+// same audit finding spelled differently still collides.
+test("dedupe: normalizeTitle collapses case, punctuation, whitespace", () => {
+  assert.equal(normalizeTitle("  Legacy .js FILE !! still-present "), "legacy js file still present");
+  assert.equal(normalizeTitle("Speed up startup"), "speed up startup");
+});
+
+// Verifies: exact and containment matches are near-matches — audit findings
+// often append a location/detail to a shared base title.
+test("dedupe: exact + containment titles are near-matches", () => {
+  assert.equal(titlesNearMatch("Legacy .js file still present", "legacy js file still present"), true); // exact after normalize
+  assert.equal(titlesNearMatch("Legacy .js file", "Legacy .js file still present"), true); // base title + appended detail
+  assert.equal(titlesNearMatch("Tracked secret-ish file", "Tracked secret-ish file: .env.prod"), true); // base title + appended location
+  assert.equal(titlesNearMatch("a", "abcdefghij"), false); // 1-char stub must not collide with everything
+});
+
+// Verifies: small edit-distance titles (typo / singular-plural) collide, while
+// genuinely different titles never do — the near-match bound is the
+// verification arithmetic (distance <= max(2, 0.15 * longest)).
+test("dedupe: near-identical edit-distance titles collide; far titles do not", () => {
+  assert.equal(titlesNearMatch("fix typo", "fix typos"), true); // 1 edit on 9-char longest <= max(2, 1)
+  assert.equal(titlesNearMatch("prune stale branch", "prune stale branches"), true); // 1 edit on 19 chars <= max(2, 2)
+  assert.equal(titlesNearMatch("a", "abcdefghij"), false); // 9 edits > max(2, 1)
+  assert.equal(titlesNearMatch("enable cve scanning", "prune stale branches"), false); // unrelated
+  assert.equal(titlesNearMatch("add tests", "add more tests for the parser"), false); // containment excluded (longer > 2x shorter)
+});
+
+// Verifies: findTitleDuplicate returns an existing non-done task whose title
+// near-matches, and ignores done tasks (a re-file after landing is allowed).
+test("dedupe: findTitleDuplicate hits open/assigned tasks, skips done", () => {
+  const tasks = [
+    { id: 1, title: "Prune stale merged remote branches", status: "done" },
+    { id: 2, title: "Prune stale merged local branches", status: "open" },
+    { id: 3, title: "Fix typo", status: "assigned" },
+  ];
+  assert.equal(findTitleDuplicate(tasks, "Prune stale merged local branch").id, 2); // trailing-s plural is 1 edit
+  assert.equal(findTitleDuplicate(tasks, "Prune stale merged remote branches"), null); // word swap = 6 edits > max(2, 4)
+  assert.equal(findTitleDuplicate(tasks, "Fix tyop").id, 3); // near-match on spelling
+  assert.equal(findTitleDuplicate(tasks, "Add a brand new feature"), null);
+});
+
+// ---------------------------------------------------------------------------
+// gh backend mutation guards: a PR number must never be closed/edited/commented/deleted
+// ---------------------------------------------------------------------------
+// Verifies: the gh store surfaces a PR as kind "pr" but refuses every mutating
+// operation on it — no `issue close/edit`, no comment POST, no delete — so the
+// #14 wrong-close cannot recur (the guard is the Command: fewer gh commands).
+test("taskstore: gh store refuses close/update/comment/remove on a PR number", () => {
+  const calls = [];
+  const deps = makeFakeDeps(calls, { 29: ghIssue(29, { title: "PR-29", pull_request: true, state: "closed" }) }).storeDeps;
+  const store = ghTaskStore(process.cwd(), { enabled: true, owner: "ytnobody", repo: "EMPRESS" }, deps);
+
+  const t = store.get(29);
+  assert.ok(t);
+  assert.equal(t.kind, "pr");
+  assert.equal(store.close(29, "landed"), null);
+  assert.equal(store.update(29, { status: "done", labels: ["needs-clarification"] }), null);
+  assert.equal(store.addComment(29, "empress", "clarify"), null);
+  assert.equal(store.remove(29), false);
+
+  const issued = calls.filter((c) => c[0] === "gh");
+  assert.ok(!issued.some((c) => c[1] === "issue" && c[2] === "close"), "must not close the PR");
+  assert.ok(!issued.some((c) => c[1] === "issue" && c[2] === "edit"), "must not edit the PR");
+  assert.ok(!issued.some((c) => c[1] === "issue" && c[2] === "delete"), "must not delete the PR");
+  assert.ok(!issued.some((c) => c[1] === "api" && String(c[2]).endsWith("/comments") && c.includes("POST")), "must not POST a comment on the PR");
+  assert.ok(issued.some((c) => c[1] === "api" && String(c[2]).endsWith("/comments") && !c.includes("POST")), "reads (comments GET for get/29) are fine");
+});
+
+// Verifies: the same ops still work on a genuine issue (guards are PR-specific,
+// not a blanket freeze) — close issues an `issue close`, update issues an edit.
+test("taskstore: gh store still closes/edits genuine issues", () => {
+  const calls = [];
+  const deps = makeFakeDeps(calls, { 7: ghIssue(7) }).storeDeps;
+  const store = ghTaskStore(process.cwd(), { enabled: true, owner: "ytnobody", repo: "EMPRESS" }, deps);
+
+  const t = store.get(7);
+  assert.equal(t.kind, "issue");
+  assert.ok(store.close(7) !== null);
+  assert.ok(calls.some((c) => c[0] === "gh" && c[1] === "issue" && c[2] === "close" && c[3] === "7"));
 });
 
 test("taskstore: desiredLabels builds the internal label set for a task state", () => {
@@ -269,6 +396,18 @@ test("taskstore: ghTaskStore.create issues a gh issue and returns a gh-backed ta
   assert.equal(t.id, 1);
   assert.ok(t.file.startsWith("gh://"));
   assert.ok(calls.some((c) => c[0] === "gh" && c[1] === "issue" && c[2] === "create"));
+});
+
+// Verifies: list (gh issue list) surfaces issues with kind "issue" — PRs never
+// appear in an issue list, but every row is still labeled for the reader.
+test("taskstore: gh list rows are kind issue (PRs never listed as tasks)", () => {
+  const calls = [];
+  const deps = makeFakeDeps(calls, { 7: ghIssue(7), 29: ghIssue(29, { title: "PR-29", pull_request: true, state: "closed" }) }).storeDeps;
+  const store = ghTaskStore(process.cwd(), { enabled: true, owner: "ytnobody", repo: "EMPRESS" }, deps);
+  const rows = store.list({ includeAll: true });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 7);
+  assert.equal(rows[0].kind, "issue");
 });
 
 test("taskstore: getTaskStore selects gh when enabled+available, local when disabled or gh down", () => {

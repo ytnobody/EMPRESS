@@ -8,7 +8,7 @@ export function register(pi: ExtensionAPI) {
   pi.registerTool({
     name: "empress_audit_scan",
     label: "Empress Audit Scan",
-    description: "Deterministic idle-audit scans across three axes: modern (TODO/FIXME/HACK rot, oversized files, legacy .js residue), secure (tracked secret-ish files like .env/credentials), light (large files). Returns per-axis findings + summary. The Superintendent audit pass files REAL findings as tasks (dedupe); the loop then implements+lands them when idle.",
+    description: "Deterministic idle-audit scans across three axes: modern (TODO/FIXME/HACK rot, oversized files, legacy .js residue), secure (tracked secret-ish files like .env/credentials), light (large files). Returns per-axis findings + summary. The Superintendent audit pass files REAL findings as tasks (deduped automatically by the CLI: near-identical titles are skipped); the loop then implements+lands them when idle. Output labels every task number as issue #N / PR #N (never a bare #N).",
     parameters: Type.Object({}),
     async execute(_id, params) {
       const cwd = projectDir();

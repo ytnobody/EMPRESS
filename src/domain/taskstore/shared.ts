@@ -58,8 +58,74 @@ export interface Task {
   created: string;
   comments: TaskComment[];
   body: string;
+  /**
+   * What the number refers to. Issues and PRs share GitHub numbering, so a
+   * gh-backed number is "issue" or "pr"; local file tasks are "local"
+   * (undefined in hand-built literals = treated as local).
+   */
+  kind?: "issue" | "pr" | "local";
   /** gh-backed tasks carry the resolved `owner/repo`; undefined for local tasks. */
   repo?: string;
+}
+
+/**
+ * The one number-labeler: issues and PRs share GitHub numbering, so a bare
+ * "#N" is ambiguous — every output must say which namespace N refers to.
+ * gh-backed entities are "issue #N"/"PR #N"; local tasks are "task #N";
+ * an unknown kind defaults to local-style "task #N". */
+export function taskRef(t: Pick<Task, "id" | "kind">): string {
+  return t.kind === "pr" ? `PR #${t.id}` : t.kind === "issue" ? `issue #${t.id}` : `task #${t.id}`;
+}
+
+/** Lowercase, strip punctuation/symbols, collapse whitespace — dedupe-friendly. */
+export function normalizeTitle(title: string): string {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/** Classic Levenshtein distance (pure). */
+export function editDistance(a: string, b: string): number {
+  const A = a.split("");
+  const B = b.split("");
+  const dp = Array.from({ length: A.length + 1 }, (_, i) => [i, ...Array(B.length).fill(0)]);
+  for (let j = 0; j <= B.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= A.length; i++) {
+    for (let j = 1; j <= B.length; j++) {
+      dp[i][j] = A[i - 1] === B[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[A.length][B.length];
+}
+
+/**
+ * Near-match test for auto-file dedupe: equal after normalization, one title
+ * contains the other (audit findings append location details to a base title —
+ * only when the shorter side is substantial relative to the longer, so a
+ * 1-char stub never collides with everything), or the edit distance is small
+ * relative to the longer title (max(2, 15% of longest) — a swapped word like
+ * "local"↔"remote" is 6 edits on 33 chars and stays a miss).
+ * # ponytail: O(n*m) editDistance on short titles (audit lengths), fine for this scale; swap in a token/Jaccard score only if dedupe ever runs on thousands of titles per call.
+ */
+export function titlesNearMatch(a: string, b: string): boolean {
+  const x = normalizeTitle(a);
+  const y = normalizeTitle(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const shorter = Math.min(x.length, y.length);
+  const longer = Math.max(x.length, y.length);
+  if (shorter >= 8 && longer <= shorter * 2 && (x.includes(y) || y.includes(x))) return true;
+  return editDistance(x, y) <= Math.max(2, Math.floor(longer * 0.15));
+}
+
+/** First non-done task whose title near-matches `title`, else null. */
+export function findTitleDuplicate(tasks: Task[], title: string): Task | null {
+  for (const t of tasks) {
+    if (t.status === "done") continue;
+    if (titlesNearMatch(t.title, title)) return t;
+  }
+  return null;
 }
 
 export interface TaskInput {
@@ -293,7 +359,7 @@ export function proposeSpec(t: Pick<Task, "title" | "body">, lang: string = dete
  * (Defined here and re-exported by tasks.ts for compatibility.) */
 export function taskBrief(t: Task): string {
   return [
-    `Task #${t.id}: ${t.title}`,
+    `${taskRef(t)}: ${t.title}`, // never a bare #N — labels issue/PR/task explicitly
     `Status: ${t.status}`,
     t.branch ? `Branch/worktree: ${t.branch}` : "",
     t.pr ? `PR: ${t.pr}` : "",
