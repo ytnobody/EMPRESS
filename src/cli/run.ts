@@ -16,8 +16,9 @@ import { loadConfig, type LoadedConfig } from "../shared/config.ts";
 import { shouldStallKill } from "../domain/stall.ts";
 import { readLoopState, patchLoopState, type LoopStatePatch } from "./state.ts";
 import { tasksHash } from "../domain/wake.ts";
-import { listTasks, getTask, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
+import { listTasks, getTask, addComment, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
 import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON, postClarifyProposals } from "../domain/readiness.ts";
+import { mergeConflict } from "../domain/git.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(__dirname, "..", "extension", "empress.ts");
@@ -158,6 +159,38 @@ async function handleResult(cwd: string, res: RunPassResult, started: string, pa
   }
 }
 
+/**
+ * LLM-free held-task stall detection (Task #52): on the audit cadence, for each
+ * open task that has a branch, check whether the branch conflicts with the base
+ * (`git merge-tree`, deterministic). If it does and no escalation comment exists
+ * yet, post one — so a held branch stuck in conflict is surfaced and re-engaged
+ * (the comment changes updatedAt -> wakes the queue) instead of verify-and-hold
+ * looping forever. Detection/healing path uses NO LLM; only a later content fix
+ * goes to an Engineer.
+ */
+function escalateConflictedHeld(cwd: string, config: LoadedConfig): void {
+  const base = config.project?.base_branch || "develop";
+  const marker = "empress:held-conflict";
+  const open = listTasks(cwd, { includeAll: true }).filter((t) => t.status !== "done" && t.branch);
+  for (const t of open) {
+    try {
+      if (mergeConflict(cwd, base, t.branch)) {
+        const already = (t.comments || []).some((c) => String(c.body || "").includes(marker));
+        if (!already) {
+          addComment(
+            cwd,
+            t.id,
+            "empress",
+            `**[empress]** Held-task staleness (driver, LLM-free): branch \`${t.branch}\` conflicts with \`${base}\`. Needs a fix pass — re-engage the Engineer to rebase/resolve.\n<!--${marker}-->`
+          );
+        }
+      }
+    } catch {
+      /* skip */
+    }
+  }
+}
+
 export async function runLoop(
   cwd: string,
   { model, thinking, once = false }: { model?: string; thinking?: string; once?: boolean } = {}
@@ -183,6 +216,10 @@ export async function runLoop(
   let prevHash: string | null = null;
   let lastAuditAt = Date.now();
   let pass = 0;
+  // LLM-free backlog continuation: set true when a ready pass leaves ready tasks
+  // still "open" (un-started) so the loop continues next tick without an external
+  // change/nudge (Task #53). Held tasks (assigned/in-progress/done) do not set it.
+  let unconsumed = false;
 
   do {
     const state = readLoopState(cwd);
@@ -215,13 +252,15 @@ export async function runLoop(
     const changed = prevHash === null || hash !== prevHash; // first tick checks too
     prevHash = hash;
 
-    // If nothing happened and no audit is due, sleep — zero LLM, zero Jev.
-    if (!changed && !auditDue) {
+    // If nothing happened (or no unconsumed backlog) and no audit is due, sleep —
+    // zero LLM, zero Jev.
+    if (!changed && !unconsumed && !auditDue) {
       await sleepFor(wakeMs);
       continue;
     }
 
-    if (changed && !auditDue) {
+    if ((changed || unconsumed) && !auditDue) {
+      unconsumed = false; // recomputed after this iteration's ready pass
       // Actionable-for-preflight: not-done tasks PLUS needs_clarification tasks that
       // have a pending human reply. Once a proposal is posted and the task marked
       // blocked (driver or empress_readiness), the default list hides it — so the
@@ -273,6 +312,9 @@ export async function runLoop(
           console.log(`\n--- pass ${pass} (${started}) ready: #${readyIds.join(", #")} ---`);
           const res = await runPass({ cwd, config, model: superModel, thinking });
           await handleResult(cwd, res, started, pass, config);
+          // LLM-free backlog continuation: if ready tasks remain un-started (still
+          // "open"), force the next tick to keep processing before idling (Task #53).
+          unconsumed = listTasks(cwd).some((t) => t.status === "open");
         } else if (pendingReply.length > 0) {
           // Clarification Q&A pass: only tasks with an actual pending human reply
           // (the rest keep their posted proposal until the human answers). The
@@ -295,6 +337,8 @@ export async function runLoop(
 
     if (auditDue) {
       lastAuditAt = Date.now();
+      // LLM-free held-stall escalation on the audit cadence (Task #52).
+      escalateConflictedHeld(cwd, config);
       pass++;
       const started = new Date().toISOString();
       console.log(`\n--- audit pass ${pass} (${started}) ---`);

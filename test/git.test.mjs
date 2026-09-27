@@ -103,3 +103,38 @@ test("decideRemotePrunes: keep-list protects merged branches from pruning", () =
   assert.deepEqual(res.prune, []);
   assert.deepEqual(res.skip, ["empress/task-1"]);
 });
+
+// mergeConflict (Task #52): LLM-free conflict detection via git merge-tree.
+import { mergeConflict } from "../src/domain/git.js";
+
+function conflictRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-mc-"));
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf-8", stdio: "pipe" });
+  g(["init", "-q", "-b", "develop"]);
+  g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+  fs.writeFileSync(path.join(dir, "x.txt"), "A\n");
+  g(["add", "-A"]); g(["commit", "-qm", "base A"]);
+  // diverging branch B: change A -> B
+  g(["checkout", "-q", "-b", "branch-b"]);
+  fs.writeFileSync(path.join(dir, "x.txt"), "B\n");
+  g(["add", "-A"]); g(["commit", "-qm", "B"]);
+  // develop: change A -> C (same line) => conflict with branch-b
+  g(["checkout", "-q", "develop"]);
+  fs.writeFileSync(path.join(dir, "x.txt"), "C\n");
+  g(["add", "-A"]); g(["commit", "-qm", "C"]);
+  // non-conflicting branch: new file only
+  g(["checkout", "-q", "-b", "branch-clean"]);
+  fs.writeFileSync(path.join(dir, "y.txt"), "Y\n");
+  g(["add", "-A"]); g(["commit", "-qm", "Y"]);
+  return dir;
+}
+
+test("mergeConflict: true for diverging same-line changes, false for additive branch", () => {
+  const dir = conflictRepo();
+  try {
+    assert.equal(mergeConflict(dir, "develop", "branch-b"), true, "branch-b should conflict with develop");
+    assert.equal(mergeConflict(dir, "develop", "branch-clean"), false, "branch-clean should merge cleanly");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

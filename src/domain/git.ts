@@ -143,6 +143,17 @@ export interface BranchPruneResult {
 }
 
 /**
+ * LLM-free merge-conflict check (git >= 2.38): `git merge-tree --write-tree`
+ * exits non-zero iff merging `branch` into `base` conflicts. Used by the driver
+ * to detect a held task branch that is stuck conflicting with the base — the
+ * harness should re-engage it instead of leaving it in verify-and-hold.
+ */
+export function mergeConflict(cwd: string, base: string, branch: string): boolean {
+  const res = run("git", ["-C", cwd, "merge-tree", "--write-tree", base, branch]);
+  return res.code !== 0;
+}
+
+/**
  * Safely delete local branches that are fully merged into `base` and are not
  * protected (the current branch, the base branch itself, `main`, `develop`, or
  * names passed via `keep`). Uses `git branch -d` (safe delete): a branch that is
