@@ -123,8 +123,53 @@ function healDepsRelink(cwd: string): void {
 }
 
 /**
+ * Deterministic: is the worktree `node_modules` resolvable to a real directory
+ * (symlink to a real dir, or a plain real dir)? The preflight's symlink-health
+ * signal for both container and host runs. A poisoned /deps write-back (realpath
+ * ENOENT on host) or a missing name reports false.
+ */
+export function nodeModulesHealthy(cwd: string): boolean {
+  try {
+    const nm = path.join(cwd, "node_modules");
+    const st = fs.lstatSync(nm);
+    if (st.isSymbolicLink()) return fs.statSync(fs.realpathSync(nm)).isDirectory();
+    return st.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pure decision: the CI-env preflight report. `skipEligible` is true when git is
+ * absent in the run environment OR deps are unresolvable — the environment cannot
+ * give a trustworthy code verdict, so a failed check there is infra-caused, not
+ * code-caused (git-or-skip). Engine readiness is NOT a skip condition: an
+ * unavailable container engine falls back to the host (trusted). (Command-
+ * verification target — assert the flip from inputs, no container needed.)
+ */
+export interface Preflight {
+  engineReady: boolean;
+  gitAvailable: boolean;
+  depsHealthy: boolean;
+  healed: boolean; // a deps symlink repair was applied during preflight
+  skipEligible: boolean;
+}
+export function decidePreflight(o: {
+  engineReady: boolean;
+  gitAvailable: boolean;
+  depsHealthy: boolean;
+  healed: boolean;
+}): Preflight {
+  const skipEligible = !o.gitAvailable || !o.depsHealthy;
+  return { ...o, skipEligible };
+}
+
+/**
  * Run the CI gate. Dispatches by engine; falls back to host when a configured
  * container engine is unavailable. Never throws (returns {code, stdout, stderr}).
+ * Before any run a preflight heals a prior run's /deps write-back (task #5),
+ * probes git presence + deps health, and reports the verdict (git-or-skip) so a
+ * failure purely from infra state is not mistaken for a code failure.
  */
 export function runCi(
   cwd: string,
@@ -135,9 +180,20 @@ export function runCi(
     network?: string;
     _run?: CiRunner;
   }
-): { code: number; stdout: string; stderr: string; engine: string } {
+): { code: number; stdout: string; stderr: string; engine: string; preflight: Preflight } {
   const { testCommand, engine = "host", image, network = "default", _run = run } = opts;
-  if (!testCommand) return { code: 0, stdout: "(no test_command configured)", stderr: "", engine: "host" };
+  const cleanPreflight = { engineReady: true, gitAvailable: true, depsHealthy: true, healed: false, skipEligible: false };
+  if (!testCommand) return { code: 0, stdout: "(no test_command configured)", stderr: "", engine: "host", preflight: cleanPreflight };
+
+  // Preflight (before any run): heal a previous run's /deps write-back so THIS
+  // run's mount discovery works, then observe deps health.
+  let healed = false;
+  const healTarget = depsRelinkRepair(cwd);
+  if (healTarget) {
+    applyDepsRelinkRepair(cwd, healTarget);
+    healed = true;
+  }
+  const depsHealthy = nodeModulesHealthy(cwd);
 
   if ((engine === "podman" || engine === "docker") && image) {
     // Bind a worktree's node_modules symlink target so the container can resolve
@@ -145,11 +201,14 @@ export function runCi(
     // resolves on the host).
     // Heal a previous run's /deps write-back BEFORE mounting, or this run's
     // discovery finds [] and repeats the 'tsc not found' failure.
-    healDepsRelink(cwd);
     const extraMounts = nodeModulesExtraMount(cwd);
     const { bin, args } = buildContainerArgs({ engine, image, network, projectPath: cwd, extraMounts });
     const probe = _run(bin, ["--version"], { cwd });
-    if (probe.code === 0) {
+    const engineReady = probe.code === 0;
+    // git-or-skip: probe git INSIDE the image (deterministic env check) — task #4.
+    const gitAvailable = engineReady ? _run(bin, ["run", "--rm", image, "git", "--version"], { cwd }).code === 0 : false;
+    const preflight = decidePreflight({ engineReady, gitAvailable, depsHealthy, healed });
+    if (engineReady) {
       // When deps are mounted at /deps, first relink /project/node_modules inside
       // the container (the OCI runtime can't bind over the host-absolute symlink).
       const cmd = extraMounts.length ? `${depsRelinkPrefix()} && ${testCommand}` : testCommand;
@@ -158,13 +217,16 @@ export function runCi(
       // the host symlink; restore it so the next run and host tooling still
       // resolve node_modules (acceptance: host selfcheck stays green).
       healDepsRelink(cwd);
-      return { code: res.code, stdout: String(res.stdout || "").trim(), stderr: String(res.stderr || "").trim(), engine };
+      return { code: res.code, stdout: String(res.stdout || "").trim(), stderr: String(res.stderr || "").trim(), engine, preflight };
     }
     // engine configured but unavailable -> fall through to host
   }
 
+  // host fallback (engine unconfigured, configured engine unavailable)
+  const hostGit = _run("git", ["--version"], { cwd }).code === 0;
+  const preflightHost = decidePreflight({ engineReady: true, gitAvailable: hostGit, depsHealthy, healed });
   const res = _run("sh", ["-c", testCommand], { cwd });
-  return { code: res.code, stdout: String(res.stdout || "").trim(), stderr: String(res.stderr || "").trim(), engine: "host" };
+  return { code: res.code, stdout: String(res.stdout || "").trim(), stderr: String(res.stderr || "").trim(), engine: "host", preflight: preflightHost };
 }
 
 /**
@@ -175,7 +237,7 @@ export function runProjectCi(
   cwd: string,
   config: { project?: { test_command?: string }; ci?: { engine?: string; image?: string; network?: string } },
   o: { _run?: CiRunner; engine?: string; image?: string; network?: string } = {}
-): { code: number; stdout: string; stderr: string; engine: string } {
+): { code: number; stdout: string; stderr: string; engine: string; preflight: Preflight } {
   const { _run, engine, image, network } = o;
   return runCi(cwd, {
     testCommand: config.project?.test_command,
