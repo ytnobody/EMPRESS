@@ -2,6 +2,7 @@
 // optional Jev System One judgment on the actual diff.
 import { diffBetween, diffPatch } from "./git.ts";
 import { jevOne, jevAvailable } from "./jev.ts";
+import { detectPureRefactor, gatherFileDiffs } from "./refactor.ts";
 import type { Config } from "../shared/config.ts";
 import type { Task } from "./tasks.ts";
 
@@ -57,6 +58,32 @@ export function deterministicRisk(
   return { level: reasons.length ? "MEDIUM" : "LOW", reasons, files, lines };
 }
 
+type RiskResult = {
+  level: Severity;
+  reasons: string[];
+  files: number;
+  lines: number;
+};
+
+/**
+ * Pure downgrade: a HIGH that is mechanically proven to be a behavior-preserving pure
+ * refactor is rated non-HIGH so the loop can auto-land it after full review. Any real
+ * behavior difference (pure=false) stays HIGH.
+ */
+export function withPureRefactorDowngrade(det: RiskResult, pure: { pure: boolean; reasons: string[] }): RiskResult {
+  if (det.level === "HIGH" && pure.pure) {
+    return {
+      ...det,
+      level: "MEDIUM",
+      reasons: [
+        ...det.reasons,
+        "mechanically-proven behavior-preserving pure refactor (equal export surface, unchanged registerTool names, no behavior-only hunks); full review still applies",
+      ],
+    };
+  }
+  return det;
+}
+
 /**
  * Full evaluation: deterministic + optional Jev choice judgment.
  * @returns {Promise<{level, reasons, deterministicLevel, jev, files, lines}>}
@@ -71,7 +98,12 @@ export async function evaluateRisk(
     (config.agent && config.agent.branch_prefix) || "empress/task"
   }-${task.id}`;
   const diff = diffBetween(cwd, base, branch);
-  const det = deterministicRisk(diff, config.risk || {});
+  let det = deterministicRisk(diff, config.risk || {});
+
+  // Mechanically prove behavior-preservation on the changed source files; if proven,
+  // drop a false-HIGH (pure relocation) to non-HIGH. Conservative: unsure stays HIGH.
+  const pure = detectPureRefactor(gatherFileDiffs(cwd, base, branch, diff.changed));
+  det = withPureRefactorDowngrade(det, pure);
 
   const out: { level: Severity; reasons: string[]; deterministicLevel: Severity; jev: { level: Severity; confidence: number | null } | null; files: number; lines: number } = {
     level: det.level,
