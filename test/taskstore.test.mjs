@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, proposeSpec, detectLanguage, resolveLang, issueLang, CLARIFY_FRAME } from "../src/domain/taskstore.js";
+import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, agentMarker, proposeSpec, detectLanguage, resolveLang, issueLang, CLARIFY_FRAME } from "../src/domain/taskstore.js";
 import { addComment, updateTask, getTask, closeTask, listTasks, removeTask } from "../src/domain/tasks.js";
 import { DEFAULTS } from "../src/shared/config.js";
 
@@ -112,10 +112,53 @@ test("taskstore: buildGhBody / stripMetadata are inverse for branch+pr", () => {
   assert.ok(full.includes("<!--empress:pr=7-->"));
 });
 
-test("taskstore: hasHumanReply flags only plain (non-agent) latest comments", () => {
-  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "**[empress]** draft spec" }] }), false);
-  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "**[superintendent]** follow-up" }, { at: "", author: "x", body: "I think it should do X" }] }), true);
-  assert.equal(hasHumanReply({ comments: [] }), false);
+// Verifies: an agent comment is one carrying the machine marker; a human who
+// mimics the readable **[agent]** prefix (no marker) is still a human reply,
+// and an agent comment missing the prefix is still an agent comment.
+test("taskstore: hasHumanReply = marker presence only (prefix is not a signal)", () => {
+  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "**[empress]** I agree, please proceed" }] }), true, "human mimicking the agent prefix is still a human reply");
+  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "draft spec\n<!--empress:agent=abc-->" }] }), false, "agent comment with marker (no prefix) is agent");
+  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "**[superintendent]** follow-up" }, { at: "", author: "x", body: "I think it should do X" }] }), true, "plain-text latest reply is human");
+  assert.equal(hasHumanReply({ comments: [{ at: "", author: "x", body: "proposal\n<!--empress:agent=abc-->" }, { at: "", author: "x", body: "answer\n<!--empress:agent=def-->" }] }), false, "latest agent comment wins");
+  assert.equal(hasHumanReply({ comments: [] }), false, "no comments => no human reply");
+});
+
+test("taskstore: agentMarker emits a unique machine-checkable marker", () => {
+  // Verifies: each posted agent comment carries an HTML-comment marker with a
+  // UUID v4 nonce — a shape humans would not reproduce by accident, unique per post.
+  const m = agentMarker();
+  assert.match(m, /^<!--empress:agent=[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-->$/);
+  assert.notEqual(agentMarker(), m);
+});
+
+test("taskstore: gh addComment POSTs the readable prefix AND the agent marker", () => {
+  // Verifies (Command verification): the gh api comment POST keeps the
+  // human-readable **[author]** prefix and appends the machine marker line, so
+  // humans can read who posted and hasHumanReply can decide by marker alone.
+  const dir = tmpdir();
+  const calls = [];
+  const store = ghTaskStore(dir, { enabled: true, owner: "ytnobody", repo: "EMPRESS" }, makeFakeDeps(calls).storeDeps);
+  store.addComment(1, "empress", "please answer");
+  const post = calls.find((c) => c[0] === "gh" && c[1] === "api" && c[2] === "repos/ytnobody/EMPRESS/issues/1/comments" && c[3] === "--method");
+  assert.ok(post, "gh api comment POST was issued");
+  const body = post[6]; // the `-f body=...` argument
+  assert.ok(body.startsWith("body=**[empress]** please answer"), "readable [agent] prefix kept");
+  assert.match(body, /\n<!--empress:agent=[0-9a-f-]{36}-->$/, "machine marker appended");
+});
+
+test("taskstore: local addComment stores the agent marker with the comment", () => {
+  // Verifies: local-store agent comments carry the same marker so the shared
+  // hasHumanReply sees one unambiguous signal in both backends, and the
+  // truthful author field is preserved.
+  const dir = tmpdir();
+  fs.mkdirSync(path.join(dir, ".empress", "tasks"), { recursive: true });
+  localTaskStore(dir).create({ title: "T" });
+  const t = localTaskStore(dir).addComment(1, "empress", "proposal");
+  assert.equal(t.comments.length, 1);
+  assert.equal(t.comments[0].author, "empress");
+  assert.ok(t.comments[0].body.startsWith("proposal"), "original body preserved");
+  assert.match(t.comments[0].body, /\n<!--empress:agent=/, "machine marker appended");
+  assert.equal(hasHumanReply(t), false, "the stored agent comment is not a human reply");
 });
 
 test("taskstore: proposeSpec derives a draft spec + open questions from the title", () => {
@@ -205,6 +248,18 @@ test("taskstore: buildMarkdown derives Purpose/Scope from title when omitted (no
 // ---------------------------------------------------------------------------
 // gh backend + selection (fake runner — never touches real GitHub)
 // ---------------------------------------------------------------------------
+test("taskstore: ghTaskStore.close posts a marker-carrying note comment", () => {
+  // Verifies: the close note goes through the same marked comment convention.
+  const dir = tmpdir();
+  const calls = [];
+  const store = ghTaskStore(dir, { enabled: true, owner: "ytnobody", repo: "EMPRESS" }, makeFakeDeps(calls).storeDeps);
+  store.close(1, "landed");
+  const post = calls.find((c) => c[0] === "gh" && c[2] === "repos/ytnobody/EMPRESS/issues/1/comments" && c[3] === "--method");
+  assert.ok(post, "close note comment was posted");
+  assert.ok(post[6].startsWith("body=**[empress]** landed"));
+  assert.match(post[6], /\n<!--empress:agent=[0-9a-f-]{36}-->$/, "close note carries the marker");
+});
+
 test("taskstore: ghTaskStore.create issues a gh issue and returns a gh-backed task", () => {
   const dir = tmpdir();
   const calls = [];

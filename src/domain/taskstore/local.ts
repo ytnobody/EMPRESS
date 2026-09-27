@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { EMPRESS_DIR } from "../../shared/config.ts";
 import { readMd, writeMd } from "../../shared/frontmatter.ts";
-import { TASK_STATUSES, buildMarkdown, type Task, type TaskInput, type TaskStore } from "./shared.ts";
+import { TASK_STATUSES, buildMarkdown, withAgentMarker, type Task, type TaskInput, type TaskStore } from "./shared.ts";
 
 function tasksDir(cwd: string): string {
   return path.join(cwd, EMPRESS_DIR, "tasks");
@@ -136,9 +136,11 @@ export const localTaskStore = (cwd: string): TaskStore => {
   };
 
   const addComment: TaskStore["addComment"] = (id, author, body) => {
+    // Harness-posted = agent comment: embed the machine marker so the shared
+    // hasHumanReply sees the same unambiguous signal as in gh mode (task #32).
     const t = get(id);
     if (!t) return null;
-    return update(id, { comments: [...t.comments, { at: new Date().toISOString(), author, body }] });
+    return update(id, { comments: [...t.comments, { at: new Date().toISOString(), author, body: withAgentMarker(body) }] });
   };
 
   const close: TaskStore["close"] = (id, note = "") => {

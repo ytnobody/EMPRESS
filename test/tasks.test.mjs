@@ -25,7 +25,9 @@ test("tasks: createTask round-trips a fresh task", () => {
 });
 
 // Verifies: addComment appends a full {author, at, body} comment object that
-// survives a read-back round-trip through the frontmatter (comments persist).
+// survives a read-back round-trip through the frontmatter (comments persist),
+// and that harness-posted (agent) comment bodies now embed the machine marker
+// (spec change, task #32: robust agent-vs-human detection).
 test("tasks: addComment persists the comment object", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tasks-"));
   try {
@@ -34,7 +36,8 @@ test("tasks: addComment persists the comment object", () => {
     const t = getTask(tmp, 1);
     assert.equal(t.comments.length, 1);
     assert.equal(t.comments[0].author, "empress");
-    assert.equal(t.comments[0].body, "hello");
+    assert.ok(t.comments[0].body.startsWith("hello"), "original body preserved");
+    assert.match(t.comments[0].body, /<!--empress:agent=/, "agent marker appended");
     assert.ok(typeof t.comments[0].at === "string");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

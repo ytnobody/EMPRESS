@@ -6,7 +6,7 @@ import { run } from "../../shared/shell.ts";
 import type { LoadedConfig } from "../../shared/config.ts";
 import { resolveRepo, type GithubConfig } from "../github.ts";
 import { localTaskStore } from "./local.ts";
-import { buildMarkdown, type StoreDeps, type Task, type TaskInput, type TaskListOpts, type TaskStore, type TaskComment } from "./shared.ts";
+import { buildMarkdown, withAgentMarker, type StoreDeps, type Task, type TaskInput, type TaskListOpts, type TaskStore, type TaskComment } from "./shared.ts";
 
 // EMPRESS-internal labels (kept out of the user-visible labels array).
 const LBL_INPROGRESS = "status:in-progress";
@@ -180,7 +180,10 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
   };
 
   const addComment: TaskStore["addComment"] = (id, author, body) => {
-    const post = gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=**[${author}]** ${body}`], 60000);
+    // Readable **[agent]** prefix for humans + invisible machine marker for
+    // hasHumanReply (task #32) — the marker is the only agent signal.
+    const marked = withAgentMarker(`**[${author}]** ${body}`);
+    const post = gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=${marked}`], 60000);
     if (post.code !== 0) return null;
     return get(id);
   };
@@ -189,7 +192,7 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
     const issue = fetchIssue(id);
     if (!issue) return null;
     if (note) {
-      gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=**[empress]** ${note}`], 60000);
+      gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=${withAgentMarker(`**[empress]** ${note}`)}`], 60000);
     }
     if (issue.state !== "closed") gh(["issue", "close", String(id), ...repoFlag()]);
     return get(id);

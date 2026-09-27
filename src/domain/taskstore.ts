@@ -17,6 +17,7 @@ export {
   proposeSpec,
   CLARIFY_FRAME,
   taskBrief,
+  agentMarker,
 } from "./taskstore/shared.ts";
 export { readTaskFile, listTaskFiles, localTaskStore } from "./taskstore/local.ts";
 export {
