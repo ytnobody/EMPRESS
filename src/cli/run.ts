@@ -10,6 +10,7 @@
 // No LLM is ever spawned just because the clock ticked past some interval with
 // nothing to do (unless the idle audit is enabled).
 import { spawn } from "node:child_process";
+import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadConfig, type LoadedConfig } from "../shared/config.ts";
@@ -18,9 +19,35 @@ import { readLoopState, patchLoopState, type LoopStatePatch } from "./state.ts";
 import { tasksHash } from "../domain/wake.ts";
 import { listTasks, getTask, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
 import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON, postClarifyProposals } from "../domain/readiness.ts";
+import { mergeTreeClean, branchExists } from "../domain/git.ts";
+import { runProjectCi } from "../domain/ci.ts";
+import { classifyHeldStatus } from "../domain/held.ts";
+import { EMPRESS_DIR } from "../shared/config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(__dirname, "..", "extension", "empress.ts");
+
+// Held-branch regression probe (Task #52). A held task is one that already has a
+// worktree + branch (implemented + reviewed, left for human sign-off). It is
+// sign-off-ready only when its branch is CI-green AND conflict-free. Re-assess
+// each held candidate cheaply and return the ids whose branch regressed (CI red
+// or a merge conflict) — those must get an Engineer pass instead of looping in
+// verify-and-hold. Only tasks that already have a worktree+branch are held
+// candidates (brand-new actionable tasks have neither and are skipped here).
+function detectHeldNeedsFix(cwd: string, config: LoadedConfig, tasks: Task[]): number[] {
+  const base = config.project?.base_branch || "develop";
+  const prefix = config.agent?.branch_prefix || "empress/task";
+  const inputs: Array<{ id: number; ciGreen: boolean; conflictFree: boolean }> = [];
+  for (const t of tasks) {
+    const branch = `${prefix}-${t.id}`;
+    const wt = path.join(cwd, EMPRESS_DIR, "worktrees", String(t.id));
+    if (!fs.existsSync(wt) || !branchExists(cwd, branch)) continue; // not a held task
+    const conflictFree = mergeTreeClean(cwd, base, branch);
+    const ciGreen = runProjectCi(wt, config).code === 0;
+    inputs.push({ id: t.id, ciGreen, conflictFree });
+  }
+  return classifyHeldStatus(inputs).needsFix;
+}
 
 const SUPER_MSG =
   "You are the EMPRESS Superintendent. Run exactly one Superintendent cycle now: " +
@@ -55,6 +82,7 @@ interface RunPassOptions {
   audit?: boolean;
   clarificationIds?: number[];
   clarifyLang?: Record<number, string>;
+  hint?: string;
 }
 
 interface RunPassResult {
@@ -63,7 +91,7 @@ interface RunPassResult {
   err: string;
 }
 
-function runPass({ cwd, config, model, thinking, audit = false, mode = "run", clarificationIds = [], clarifyLang = {} }: RunPassOptions): Promise<RunPassResult> {
+function runPass({ cwd, config, model, thinking, audit = false, mode = "run", clarificationIds = [], clarifyLang = {}, hint }: RunPassOptions): Promise<RunPassResult> {
   const agentPrompt = path.join(cwd, ".empress", "agents", "superintendent.md");
   const args: string[] = ["--print", "--no-session", "-e", EXTENSION];
   if (model) args.push("--model", model);
@@ -77,6 +105,7 @@ function runPass({ cwd, config, model, thinking, audit = false, mode = "run", cl
       : "Respond in the language of each issue's title/body (detected: ja for Japanese, zh, ko, else en).";
     args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}\n${langHint}`);
   } else args.push(SUPER_MSG);
+  if (hint) args.push(hint);
 
   return new Promise((resolve) => {
     const proc = spawn("pi", args, { cwd, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
@@ -242,6 +271,19 @@ export async function runLoop(
         console.log(`\n[wake ${new Date().toISOString()}] queue changed but no actionable tasks — skip (zero LLM)`);
         patchLoopState(cwd, { last_skip_reason: "tasks changed, none actionable" });
       } else {
+        // Held-branch regression gate (Task #52): held (implemented+reviewed, left
+        // for human sign-off) tasks whose branch regressed (CI red / merge conflict)
+        // are surfaced as needs-fix so an Engineer re-engages instead of looping in
+        // verify-and-hold. Only tasks that already have a worktree+branch are probed.
+        const needsFixHeld = detectHeldNeedsFix(cwd, config, actionable);
+        const heldHint =
+          needsFixHeld.length > 0
+            ? `HELD-BRANCH REGRESSION (Task #52): the following held tasks' branches are NOT sign-off-ready ` +
+              `because their CI is red or they now have a merge conflict: #${needsFixHeld.join(", #")}. ` +
+              `Re-engage an Engineer for each (spawn_engineers) to rebase/re-implement it cleanly. ` +
+              `A held branch is sign-off-ready ONLY when it is CI-green AND conflict-free; do NOT ` +
+              `verify-and-hold a regressed branch — route it to an Engineer instead.`
+            : undefined;
         // preflight: ONE Jev batch call; spawn LLM only if something is ready
         const checks = await checkReadyTasks(cwd, config, actionable);
         // Visible degradation: count consecutive Jev-failure preflights and log them
@@ -271,7 +313,7 @@ export async function runLoop(
           pass++;
           const started = new Date().toISOString();
           console.log(`\n--- pass ${pass} (${started}) ready: #${readyIds.join(", #")} ---`);
-          const res = await runPass({ cwd, config, model: superModel, thinking });
+          const res = await runPass({ cwd, config, model: superModel, thinking, hint: heldHint });
           await handleResult(cwd, res, started, pass, config);
         } else if (pendingReply.length > 0) {
           // Clarification Q&A pass: only tasks with an actual pending human reply
@@ -286,6 +328,16 @@ export async function runLoop(
           console.log(`\n--- clarify pass ${pass} (${started}) clarification: #${ids.join(", #")} ---`);
           const cres = await runPass({ cwd, config, model: superModel, thinking, mode: "clarify", clarificationIds: ids, clarifyLang: langMap });
           await handleResult(cwd, cres, started, pass, config);
+        } else if (needsFixHeld.length > 0) {
+          // A regressed held branch is actionable work even when no task passes
+          // readiness (held branches are already-implemented; lesson #104 forbids
+          // re-running readiness on them). Fire a Superintendent pass to re-engage
+          // an Engineer on the needs-fix held branches instead of skipping.
+          pass++;
+          const started = new Date().toISOString();
+          console.log(`\n--- pass ${pass} (${started}) held-needs-fix: #${needsFixHeld.join(", #")} ---`);
+          const res = await runPass({ cwd, config, model: superModel, thinking, hint: heldHint });
+          await handleResult(cwd, res, started, pass, config);
         } else {
           console.log(`\n[wake ${new Date().toISOString()}] 0 ready ${notReady.length ? "— awaiting human reply on clarification" : ""} — skip (zero LLM)`);
           patchLoopState(cwd, { last_skip_reason: notReady.length ? "awaiting human reply on clarification" : `no ready work (${actionable.length} actionable)` });

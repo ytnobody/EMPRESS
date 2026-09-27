@@ -137,6 +137,18 @@ export function branchIsAncestor(cwd: string, base: string, branch: string): boo
   return run("git", ["-C", cwd, "merge-base", "--is-ancestor", base, branch]).code === 0;
 }
 
+/**
+ * Deterministic conflict-free probe: does `branch` merge into `base` without a
+ * conflict? Uses `git merge-tree --write-tree` (exit 0 == a clean tree oid is
+ * emitted, no conflict). The decision is pure and quick (client-side, no merge
+ * mutates any ref); it is the "conflictFree" axis of held-branch sign-off
+ * readiness (task #52). Fail-safe: any git error (e.g. missing branch) yields
+ * false so a branch the loop cannot verify is never treated as clean.
+ */
+export function mergeTreeClean(cwd: string, base: string, branch: string): boolean {
+  return run("git", ["-C", cwd, "merge-tree", "--write-tree", base, branch]).code === 0;
+}
+
 export interface BranchPruneResult {
   pruned: string[];
   skipped: string[];

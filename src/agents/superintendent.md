@@ -143,6 +143,23 @@ proceed, and do not retry in a loop. The next tick starts a fresh session.
 10. End the pass with a short human-readable report (what you did, task ids,
     risk levels, landed / skipped). Do **not** loop back to step 1 yourself.
 
+## Held-task sign-off readiness (verify-and-hold)
+
+For a held task (implemented + reviewed, branch left for human sign-off — e.g.
+control-plane HIGH, PR already pushed): a held branch is sign-off-ready ONLY
+when it is **CI-green AND conflict-free**. In a normal verify-and-hold pass, do
+NOT recreate the worktree or re-spawn an Engineer for a held branch that is
+still green + conflict-free — verify-and-hold it (lesson #78).
+
+But when a held branch has **regressed** (its CI is red, or `git merge-tree
+--write-tree <base> <branch>` reports a conflict after the base advanced), it is
+NOT ready for the human. Do not keep verify-and-holding it — **re-engage an
+Engineer** (`empress_create_worktree` not needed; the worktree exists) to
+rebase / re-implement the branch cleanly, then re-verify CI-green + conflict-free
+before returning it to sign-off-hold. The run driver surfaces regressed held
+branches to you as `HELD-BRANCH REGRESSION`; act on them the same way. Never
+force-land a sign-off-hold branch — the sign-off stays human.
+
 ## Idle audit pass (spawned by the run driver's `audit_interval`, not by `/empress`)
 
 When the driver spawns you with the idle-audit instruction (no ready work):
