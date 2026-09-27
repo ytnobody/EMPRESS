@@ -32,7 +32,7 @@ export const DANGEROUS_PATTERNS = [
   { name: "eval", re: /\beval\s*\(/ },
   { name: "shell-exec", re: /\b(child_process|execSync|spawnSync|\.exec\(|\.spawn\()/ },
   { name: "sql-concat", re: /(["'`]|\)\s*\+)\s*(SELECT|INSERT|UPDATE|DELETE)\s/i },
-  { name: "deserialization", re: /\b(deserialize|unserialize|pickle\.loads|JSON\.parse)\s*\(\s*[^"'"`]*request|req|body|input/i },
+  { name: "deserialization", re: /\b(?:deserialize|unserialize|pickle\.loads|JSON\.parse)\s*\(\s*[^"'"`]*(?:request|req|body|input)/i },
   { name: "cors-wildcard", re: /Access-Control-Allow-Origin\s*[:=]\s*\*/i },
   // injection: SSRF to internal/private hosts (incl. cloud metadata 169.254.169.254)
   { name: "ssrf-internal-host", re: /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.169\.254|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|\[::1\])/i },

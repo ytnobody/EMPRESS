@@ -48,6 +48,27 @@ test("scanDiff: sh -c literal -> no injection flag", () => {
   assert.ok(!ok.dangerous.includes("sh-c-injection"));
 });
 
+// Verifies: the deserialization regex requires the deserialize call posture — a
+// comment line that merely contains the substring 'req' inside a prose word like
+// 'requires' (the line that tripped task #59) or a bare 'input'/'body' word, with
+// NO deserialize call before it, must NOT be flagged (ungrouped alternation FP:
+// the old /...*request|req|body|input/ matched bare/substring words anywhere).
+test("scanDiff: deserialization FP — prose 'req'/'input'/'body' without a call is not flagged", () => {
+  const prose = scanDiff("+// requires genuine stdout here; every request body is input\n");
+  assert.ok(!prose.dangerous.includes("deserialization"));
+  const bare = scanDiff("+// the input and body go through the handler\n");
+  assert.ok(!bare.dangerous.includes("deserialization"));
+});
+
+// Verifies: real untrusted-input deserialization calls (JSON.parse of a request
+// body / input) still trigger the deserialization flag after the grouping fix.
+test("scanDiff: deserialization still flags real JSON.parse(request.body)/JSON.parse(input)", () => {
+  const r1 = scanDiff('+const data = JSON.parse(request.body);\n');
+  assert.ok(r1.dangerous.includes("deserialization"));
+  const r2 = scanDiff('+const data = JSON.parse(input);\n');
+  assert.ok(r2.dangerous.includes("deserialization"));
+});
+
 // Verifies: code-without-tests is a PFT §9 convention signal; with tests it isn't.
 test("conventionSignals: code-only change flags PFT suspicion", () => {
   assert.deepEqual(conventionSignals(["src/cli/state.js"]), { testsChanged: false, codeWithoutTests: true });
