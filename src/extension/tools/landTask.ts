@@ -35,6 +35,19 @@ export function register(pi: ExtensionAPI) {
         const wt = path.join(cwd, ".empress", "worktrees", String(params.id));
         const check = runProjectCi(fs.existsSync(wt) ? wt : cwd, config);
         if (check.code !== 0) {
+          // git-or-skip: a failure on an env the preflight already flagged as
+          // infra-caused (git absent / deps unresolvable) is not a code failure —
+          // attribute it and let the Superintendent decide, rather than report a
+          // spurious code-CI failure purely from prior infra state.
+          if (check.preflight.skipEligible) {
+            return reply(JSON.stringify({
+              merged: false,
+              reason: "ci_env_skip",
+              note: "check failed but preflight classifies it as infra-caused (git/deps); not a code failure",
+              preflight: check.preflight,
+              detail: (check.stderr.slice(0, 1000) || check.stdout.slice(0, 1000)),
+            }));
+          }
           return reply(JSON.stringify({ merged: false, reason: `test_command failed (${check.engine}): ${check.stderr.slice(0, 1000) || check.stdout.slice(0, 1000)}` }));
         }
       }

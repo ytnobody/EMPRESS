@@ -21,7 +21,18 @@ export function register(pi: ExtensionAPI) {
       const testCommand = config.project?.test_command;
       if (!testCommand) return reply(JSON.stringify({ passing: true, note: "no test_command configured" }));
       const res = runProjectCi(fs.existsSync(wt) ? wt : cwd, config);
-      return reply(JSON.stringify({ passing: res.code === 0, engine: res.engine, command: testCommand, stdout: res.stdout.slice(0, 4000), stderr: res.stderr.slice(0, 2000) }));
+      const pf = res.preflight;
+      return reply(JSON.stringify({
+        passing: res.code === 0,
+        engine: res.engine,
+        command: testCommand,
+        // git-or-skip: an env without git or resolvable deps cannot give a
+        // trustworthy code verdict, so a failure there is infra-caused, not code.
+        skipEligible: pf.skipEligible,
+        preflight: { gitAvailable: pf.gitAvailable, depsHealthy: pf.depsHealthy, healed: pf.healed },
+        stdout: res.stdout.slice(0, 4000),
+        stderr: res.stderr.slice(0, 2000),
+      }));
     },
   });
 }

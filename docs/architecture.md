@@ -303,6 +303,13 @@ without a real container). If a configured engine is unavailable it falls back
  to the host — the same graceful degradation as Jev. Host secrets are never
 injected; container root maps to the host user via the rootless subuid range.
 
+Before any container run, a deterministic **preflight** (`decidePreflight`/
+`nodeModulesHealthy`) heals a prior run's `/deps` write-back on the worktree
+`node_modules` symlink (task #5), probes `git` presence in the image (task #4),
+and probes deps health. When git is absent or deps are unresolvable the check is
+a `skipEligible` env-skip — git-or-skip — so a failure purely from prior infra
+state is attributed to the environment, not the code.
+
 ### 7.2 Review triage (cheap, Jev-gated)
 
 Before the deep LLM review, `empress_triage_review` decides whether one is
