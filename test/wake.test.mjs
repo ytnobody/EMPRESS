@@ -7,7 +7,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { tasksHash } from "../src/domain/wake.js";
-import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../src/domain/readiness.js";
+import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON, planClarifyProposals, postClarifyProposals, CLARIFY_PROPOSAL_MARKER } from "../src/domain/readiness.js";
+import { getTask } from "../src/domain/tasks.js";
+import { localTaskStore, proposeSpec } from "../src/domain/taskstore.js";
 
 function mkTasksDir(extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wake-"));
@@ -131,4 +133,106 @@ test("nextJevFailures: increments while degraded, resets on recovery", () => {
   assert.equal(nextJevFailures(true, 3), 4); // consecutive run continues
   assert.equal(nextJevFailures(false, 3), 0); // success -> reset
   assert.equal(nextJevFailures(false, undefined), 0); // never degraded
+});
+
+// ---------------------------------------------------------------------------
+// Proposal-first clarification (Task #35): planClarifyProposals / postClarifyProposals
+// ---------------------------------------------------------------------------
+
+// Verifies: an under-specified (title-only) task plans exactly ONE proposal Command
+// whose comment carries the dedupe marker, the proposeSpec draft spec, the open
+// questions, and the readiness reasons — expected fields derived from proposeSpec
+// (a separately specified pure function), not from the implementation's output.
+test("planClarifyProposals: one proposal per under-specified task, with marker + draft spec + reasons", () => {
+  const task = { id: 3, title: "Tune the watcher", body: "# Tune the watcher", comments: [] };
+  const reasons = ["body too short (<40 non-whitespace chars)", "no acceptance-criteria section"];
+  const plans = planClarifyProposals([{ task, reasons }]);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].taskId, 3);
+  const c = plans[0].comment;
+  const p = proposeSpec(task, "en"); // spec content is proposeSpec's contract
+  assert.ok(c.startsWith("**[empress]** "), "agent marker prefix (local stores store it verbatim)");
+  assert.ok(c.includes(`<!--${CLARIFY_PROPOSAL_MARKER}-->`), "dedupe marker present");
+  assert.ok(c.includes(`- Purpose: ${p.purpose}`));
+  assert.ok(c.includes(`- Scope: ${p.scope}`));
+  assert.ok(c.includes(`- Acceptance Criteria: [ ] ${p.acceptance[0]}`));
+  assert.ok(c.includes(`- Non-Goals: ${p.nongoals.join(", ")}`));
+  for (const q of p.questions) assert.ok(c.includes(q), `open question present: ${q}`);
+  assert.ok(c.includes(`(reason: ${reasons.join("; ")})`), "readiness reasons carried verbatim");
+});
+
+// Verifies: dedupe — a task whose comments already contain the proposal marker plans
+// nothing (a proposal is never posted twice, whatever posted the first one).
+test("planClarifyProposals: an already-proposed task plans nothing (dedupe)", () => {
+  const task = { id: 4, title: "Old issue", body: "# Old issue", comments: [{ at: "", author: "empress", body: `**[empress]** draft <!--${CLARIFY_PROPOSAL_MARKER}-->` }] };
+  assert.deepEqual(planClarifyProposals([{ task, reasons: ["body too short"] }]), []);
+});
+
+// Verifies: dedupe is per-task — an already-proposed task does not suppress the fresh one.
+test("planClarifyProposals: dedupe is per task (fresh tasks still planned)", () => {
+  const proposed = { id: 1, title: "Old", body: "# Old", comments: [{ at: "", author: "empress", body: `x <!--${CLARIFY_PROPOSAL_MARKER}-->` }] };
+  const fresh = { id: 2, title: "New", body: "# New", comments: [] };
+  const plans = planClarifyProposals([{ task: proposed, reasons: [] }, { task: fresh, reasons: [] }]);
+  assert.deepEqual(plans.map((x) => x.taskId), [2], "only the fresh task is planned, in input order");
+});
+
+// Verifies: language awareness — a Japanese title-only issue gets the Japanese framing
+// and the Japanese draft spec (header/section labels and proposeSpec fields).
+test("planClarifyProposals: Japanese issue gets a Japanese proposal", () => {
+  const task = { id: 5, title: "起動を速くする", body: "# 起動を速くする", comments: [] };
+  const plans = planClarifyProposals([{ task, reasons: ["body too short"] }]);
+  assert.equal(plans.length, 1);
+  const c = plans[0].comment;
+  const p = proposeSpec(task, "ja");
+  assert.ok(c.includes("仕様が不足しています"), "Japanese intro");
+  assert.ok(c.includes("提案（ドラフト）:"), "Japanese Proposed label");
+  assert.ok(c.includes("未解決の質問:"), "Japanese Open questions label");
+  assert.ok(c.includes(`- Purpose: ${p.purpose}`));
+  assert.ok(p.questions.every((q) => c.includes(q)), "Japanese questions embedded");
+});
+
+// Verifies: empty input plans nothing (no spurious comments on an empty queue).
+test("planClarifyProposals: empty checks plan nothing", () => {
+  assert.deepEqual(planClarifyProposals([]), []);
+});
+
+function clarifyTmpdir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "wake-clarify-"));
+}
+
+// Verifies (shell boundary smoke): postClarifyProposals executes the planned Command
+// on the real local store — comment persisted with the marker, task marked
+// needs_clarification + blocked, no pending reply reported (the proposal itself is
+// an agent comment), and a second call posts nothing (dedupe via the fresh read).
+test("postClarifyProposals: posts proposal + marks blocked; repeats dedupe to 0", () => {
+  const dir = clarifyTmpdir();
+  const created = localTaskStore(dir).create({ title: "Title only" });
+  const r1 = postClarifyProposals(dir, [{ task: created, reasons: ["body too short"] }]);
+  assert.equal(r1.posted, 1);
+  assert.deepEqual(r1.pendingReply, []); // agent proposal is not a human reply
+  const fresh = getTask(dir, created.id);
+  assert.ok(fresh.comments.some((c) => c.body.includes(CLARIFY_PROPOSAL_MARKER)), "proposal comment persisted");
+  assert.equal(fresh.needs_clarification, true);
+  assert.equal(fresh.status, "blocked");
+  const r2 = postClarifyProposals(dir, [{ task: fresh, reasons: ["body too short"] }]);
+  assert.equal(r2.posted, 0, "no duplicate proposal on the next wake");
+  assert.deepEqual(r2.pendingReply, []);
+});
+
+// Verifies: pendingReply is the single-reply pick-up gate — a plain (non-agent)
+// latest comment counts as a pending human reply and no new proposal is posted for
+// an already-proposed task; an agent follow-up comment does NOT count.
+test("postClarifyProposals: pendingReply reports a human reply, never an agent comment", () => {
+  const dir = clarifyTmpdir();
+  const created = localTaskStore(dir).create({ title: "Title only" });
+  postClarifyProposals(dir, [{ task: created, reasons: ["body too short"] }]);
+  // the human answers in a plain comment (as on GitHub) — latest comment, no [agent] prefix
+  const replied = localTaskStore(dir).addComment(created.id, "ytnobody", "Accept: do X, skip Y");
+  const r = postClarifyProposals(dir, [{ task: replied, reasons: ["body too short"] }]);
+  assert.equal(r.posted, 0, "already proposed — deduped");
+  assert.deepEqual(r.pendingReply, [created.id], "the human reply is picked up on the next wake");
+  // agent follow-up after the reply resets the gate (latest comment is agent-owned)
+  localTaskStore(dir).addComment(created.id, "superintendent", "**[superintendent]** follow-up question");
+  const again = postClarifyProposals(dir, [{ task: getTask(dir, created.id), reasons: ["body too short"] }]);
+  assert.deepEqual(again.pendingReply, [], "agent follow-up is not a human reply");
 });
