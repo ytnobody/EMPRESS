@@ -1,0 +1,45 @@
+# Optional mutation + Jev weak-test gate on GitHub Actions.
+#
+# CI mirror of the LOCAL `empress_check_mutation` gate (Superintendent review
+# pass), which stays canonical: mutate the changed src files of the branch that
+# have tests, run each test against each mutant, classify surviving mutants via
+# Jev (when TYPESAFE_API_KEY is set; else min_score alone), and fail when a
+# file is below min_score or a genuine gap is found.
+#
+# OPTIONAL: delete this file (or set [mutation] enabled=false in empress.toml)
+# to turn the job off. Scope is the branch diff only (`git diff <base>...HEAD`)
+# and runs are capped (--max-files 1 --max-mutants 12) to keep CI bounded; the
+# local gate still covers the full configured scope.
+name: Mutation gate
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for the branch diff)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Mutation gate on changed code (capped)
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        run: bun scripts/mutation-gate.ts --max-files 1 --max-mutants 12

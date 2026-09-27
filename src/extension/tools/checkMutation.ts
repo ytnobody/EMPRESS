@@ -4,8 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getTask } from "../../domain/tasks.ts";
 import { diffBetween } from "../../domain/git.ts";
-import { findTests, mutationTargets, runMutations } from "../../domain/mutation.ts";
-import { jevAvailable, jevJudge } from "../../domain/jev.ts";
+import { runMutationGate } from "../../domain/mutation.ts";
 import { cfg, projectDir, reply } from "./helpers.ts";
 
 export function register(pi: ExtensionAPI) {
@@ -26,39 +25,21 @@ export function register(pi: ExtensionAPI) {
         ? path.join(cwd, ".empress", "worktrees", String(params.id))
         : cwd;
       const changed = diffBetween(wt, base, t.branch).changed;
-      const testIndex = findTests(wt);
-      const targets = mutationTargets(wt, changed, testIndex, mc.max_files ?? 3);
-      const reports = targets.map((x) => runMutations(wt, x.relSrc, x.test));
-      const survivors = reports.flatMap((r) => r.survivors.map((s) => ({ file: r.relSrc, id: s })));
-      const lowFiles = reports.filter((r) => r.total > 0 && r.score < (mc.min_score ?? 0.8));
-
-      let genuine = 0;
-      let jevNote = survivors.length ? "unclassified (no Jev)" : "no survivors";
-      if (survivors.length > 0 && jevAvailable().available) {
-        const states = survivors.map((s) => `File ${s.file}: mutant "${s.id}" survived — the test did NOT fail when the source was changed this way. Is this an equivalent/benign mutant, or a genuine gap where the test fails to verify the changed behavior (weak/meaningless assertion)?`);
-        const j = await jevJudge({ type: "noul", instructions: "For each surviving mutant: high noul means it is a GENUINE GAP / weak test (must review); low noul means it is an EQUIVALENT, benign mutant.", states, model: (config.jev && config.jev.model) || "jev-latest" });
-        if (j.ok) {
-          genuine = j.results.reduce<number>(
-            (acc, r) => acc + (r.answer && typeof r.answer.noul === "number" && r.answer.noul >= 0.7 ? 1 : 0),
-            0
-          );
-          jevNote = `classified ${j.results.length} survivor(s)`;
-        } else {
-          jevNote = `jev failed: ${j.error}`;
-        }
-      }
-
-      const okFlag = lowFiles.length === 0 && genuine === 0;
-      const avg = reports.length ? reports.reduce((a, r) => a + r.score, 0) / reports.length : 1;
+      const gate = await runMutationGate(wt, changed, {
+        minScore: mc.min_score ?? 0.8,
+        maxFiles: mc.max_files ?? 3,
+        maxMutants: mc.max_mutants ?? 60,
+        jevModel: (config.jev && config.jev.model) || "jev-latest",
+      });
       return reply(
         JSON.stringify({
-          ok: okFlag,
-          score: avg,
-          low_score_files: lowFiles.map((r) => ({ file: r.relSrc, score: r.score, survivors: r.survivors })),
-          survivors,
-          genuine_gaps: genuine,
-          jev: jevNote,
-          files: reports.map((r) => ({ file: r.relSrc, killed: r.killed, total: r.total, score: r.score })),
+          ok: gate.ok,
+          score: gate.score,
+          low_score_files: gate.lowFiles.map((r) => ({ file: r.relSrc, score: r.score, survivors: r.survivors })),
+          survivors: gate.survivors,
+          genuine_gaps: gate.genuine,
+          jev: gate.jevNote,
+          files: gate.reports.map((r) => ({ file: r.relSrc, killed: r.killed, total: r.total, score: r.score })),
         })
       );
     },
