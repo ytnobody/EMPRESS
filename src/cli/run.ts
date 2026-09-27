@@ -19,6 +19,25 @@ import { tasksHash } from "../domain/wake.ts";
 import { listTasks, getTask, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
 import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON, postClarifyProposals } from "../domain/readiness.ts";
 
+// ---- Ready-backlog cadence (Task #53) ----
+// Ready work self-propagates across ticks while a ready backlog remains: a batch
+// split by max_engineers leaves leftovers READY, but they would be stranded because
+// the run driver only wakes on a queue-hash change. `backlog` records "a ready batch
+// was processed last tick and may not be fully consumed" so the next tick reprocesses
+// without needing an external change; an audit-due tick defers the ready pass but
+// must not clear the backlog (an interleaved audit pass does not strand it). When
+// genuinely nothing is ready the signal clears, so there is no busy-spin / idle LLM.
+
+/** Pure: should the ready-work preflight+pass run this tick. */
+export function shouldRunReadyPass({ queueChanged, backlog, auditDue }: { queueChanged: boolean; backlog: boolean; auditDue: boolean }): boolean {
+  return (queueChanged || backlog) && !auditDue;
+}
+
+/** Pure: evolve the backlog signal after a preflight — ready work keeps it on, none clears it. */
+export function backlogAfterPreflight(readyCount: number): boolean {
+  return readyCount > 0;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(__dirname, "..", "extension", "empress.ts");
 
@@ -183,6 +202,7 @@ export async function runLoop(
   let prevHash: string | null = null;
   let lastAuditAt = Date.now();
   let pass = 0;
+  let backlog = false; // Task #53: leftover ready work self-propagates next tick
 
   do {
     const state = readLoopState(cwd);
@@ -214,14 +234,17 @@ export async function runLoop(
     const hash = tasksHash(cwd);
     const changed = prevHash === null || hash !== prevHash; // first tick checks too
     prevHash = hash;
+    const wantReady = shouldRunReadyPass({ queueChanged: changed, backlog, auditDue });
 
-    // If nothing happened and no audit is due, sleep — zero LLM, zero Jev.
-    if (!changed && !auditDue) {
+    // If nothing to process and no audit is due, sleep — zero LLM, zero Jev.
+    // (wantReady already folds in the ready-backlog signal, so a backlog reprocesses
+    // here even when the queue hash did not change.)
+    if (!wantReady && !auditDue) {
       await sleepFor(wakeMs);
       continue;
     }
 
-    if (changed && !auditDue) {
+    if (wantReady) {
       // Actionable-for-preflight: not-done tasks PLUS needs_clarification tasks that
       // have a pending human reply. Once a proposal is posted and the task marked
       // blocked (driver or empress_readiness), the default list hides it — so the
@@ -239,6 +262,7 @@ export async function runLoop(
         }
       }
       if (actionable.length === 0) {
+        backlog = false; // no ready work → stop self-propagation (no spin)
         console.log(`\n[wake ${new Date().toISOString()}] queue changed but no actionable tasks — skip (zero LLM)`);
         patchLoopState(cwd, { last_skip_reason: "tasks changed, none actionable" });
       } else {
@@ -254,6 +278,7 @@ export async function runLoop(
           patchLoopState(cwd, patch);
         }
         const readyIds = checks.filter((c) => c.ready).map((c) => c.task.id);
+        backlog = backlogAfterPreflight(readyIds.length); // Task #53: re-evaluate next tick
         const notReady = checks.filter((c) => !c.ready);
         // Proposal-first immediate response (Task #35): any not-ready task gets its
         // draft spec + open questions posted NOW (deduped by the marker), before any
