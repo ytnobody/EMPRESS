@@ -15,8 +15,8 @@ import path from "node:path";
 import { loadConfig, type LoadedConfig } from "../shared/config.ts";
 import { readLoopState, patchLoopState, type LoopStatePatch } from "./state.ts";
 import { tasksHash } from "../domain/wake.ts";
-import { listTasks, detectLanguage } from "../domain/tasks.ts";
-import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON } from "../domain/readiness.ts";
+import { listTasks, getTask, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
+import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON, postClarifyProposals } from "../domain/readiness.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(__dirname, "..", "extension", "empress.ts");
@@ -190,7 +190,22 @@ export async function runLoop(
     }
 
     if (changed && !auditDue) {
-      const actionable = listTasks(cwd);
+      // Actionable-for-preflight: not-done tasks PLUS needs_clarification tasks that
+      // have a pending human reply. Once a proposal is posted and the task marked
+      // blocked (driver or empress_readiness), the default list hides it — so the
+      // reply must still be picked up here on the next wake, or a single human reply
+      // could never resolve the task. gh's issue list carries no comments, so tasks
+      // needing the reply check are re-read fresh (cheap, deterministic).
+      const actionable: Task[] = [];
+      for (const t of listTasks(cwd, { includeAll: true })) {
+        if (t.status === "done") continue;
+        if (!t.needs_clarification) {
+          actionable.push(t);
+        } else {
+          const fresh = getTask(cwd, t.id);
+          if (fresh && hasHumanReply(fresh)) actionable.push(fresh);
+        }
+      }
       if (actionable.length === 0) {
         console.log(`\n[wake ${new Date().toISOString()}] queue changed but no actionable tasks — skip (zero LLM)`);
         patchLoopState(cwd, { last_skip_reason: "tasks changed, none actionable" });
@@ -207,31 +222,41 @@ export async function runLoop(
           patchLoopState(cwd, patch);
         }
         const readyIds = checks.filter((c) => c.ready).map((c) => c.task.id);
-        if (readyIds.length === 0) {
-          const notReady = checks.filter((c) => !c.ready).map((c) => c.task);
-          if (notReady.length) {
-            // Clarification Q&A pass: thin/under-specified tasks (incl. fresh
-            // human-created issues) — the Superintendent drives the Q&A via
-            // comments and, when resolved, rewrites the issue body + clears
-            // needs_clarification so the next pass can implement.
-            pass++;
-            const started = new Date().toISOString();
-            const ids = notReady.map((t) => t.id);
-            const langMap: Record<number, string> = {};
-            for (const t of notReady) langMap[t.id] = detectLanguage(`${t.title || ""} ${t.body || ""}`);
-            console.log(`\n--- clarify pass ${pass} (${started}) clarification: #${ids.join(", #")} ---`);
-            const cres = await runPass({ cwd, config, model: superModel, thinking, mode: "clarify", clarificationIds: ids, clarifyLang: langMap });
-            await handleResult(cwd, cres, started, pass, config);
-          } else {
-            console.log(`\n[wake ${new Date().toISOString()}] ${actionable.length} actionable, 0 ready (${checks.filter((c) => !c.ready).length} not-ready) — skip (zero LLM)`);
-            patchLoopState(cwd, { last_skip_reason: `no ready work (${actionable.length} actionable)` });
-          }
-        } else {
+        const notReady = checks.filter((c) => !c.ready);
+        // Proposal-first immediate response (Task #35): any not-ready task gets its
+        // draft spec + open questions posted NOW (deduped by the marker), before any
+        // LLM round trip — a fresh title-only issue costs zero LLM on first detection.
+        let pendingReply: number[] = [];
+        if (notReady.length) {
+          const posted = postClarifyProposals(cwd, notReady.map((c) => ({ task: c.task, reasons: c.reasons })));
+          pendingReply = posted.pendingReply;
+          console.log(
+            `\n[wake ${new Date().toISOString()}] not-ready: ${notReady.length} (${posted.posted} clarify proposal(s) posted)` +
+              (pendingReply.length ? `; ${pendingReply.length} with pending human reply` : "")
+          );
+        }
+        if (readyIds.length > 0) {
           pass++;
           const started = new Date().toISOString();
           console.log(`\n--- pass ${pass} (${started}) ready: #${readyIds.join(", #")} ---`);
           const res = await runPass({ cwd, config, model: superModel, thinking });
           await handleResult(cwd, res, started, pass, config);
+        } else if (pendingReply.length > 0) {
+          // Clarification Q&A pass: only tasks with an actual pending human reply
+          // (the rest keep their posted proposal until the human answers). The
+          // Superintendent drives the Q&A via comments and, when resolved, rewrites
+          // the issue body + clears needs_clarification so the next pass can implement.
+          pass++;
+          const started = new Date().toISOString();
+          const ids = pendingReply;
+          const langMap: Record<number, string> = {};
+          for (const c of checks) if (pendingReply.includes(c.task.id)) langMap[c.task.id] = detectLanguage(`${c.task.title || ""} ${c.task.body || ""}`);
+          console.log(`\n--- clarify pass ${pass} (${started}) clarification: #${ids.join(", #")} ---`);
+          const cres = await runPass({ cwd, config, model: superModel, thinking, mode: "clarify", clarificationIds: ids, clarifyLang: langMap });
+          await handleResult(cwd, cres, started, pass, config);
+        } else {
+          console.log(`\n[wake ${new Date().toISOString()}] 0 ready ${notReady.length ? "— awaiting human reply on clarification" : ""} — skip (zero LLM)`);
+          patchLoopState(cwd, { last_skip_reason: notReady.length ? "awaiting human reply on clarification" : `no ready work (${actionable.length} actionable)` });
         }
       }
     }

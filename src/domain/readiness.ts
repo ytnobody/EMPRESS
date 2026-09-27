@@ -1,8 +1,10 @@
 // Task readiness: deterministic guards (length, acceptance-criteria section) plus
 // an optional Jev `noul` judgment on whether the task is implementable as written.
+// Also hosts the proposal-first clarification planner + shell (Task #35): a not-ready
+// task gets its draft spec + open questions posted on first detection (deduped).
 import { jevOne, jevJudge, jevAvailable } from "./jev.ts";
+import { getTask, addComment, updateTask, proposeSpec, detectLanguage, hasHumanReply, type Task } from "./tasks.ts";
 import type { Config } from "../shared/config.ts";
-import type { Task } from "./tasks.ts";
 
 /** Options for the deterministic readiness guards. */
 interface ReadinessOptions {
@@ -92,6 +94,110 @@ export async function checkReadiness(
   }
 
   return result;
+}
+
+/** Marker that identifies an EMPRESS clarification-proposal comment (the dedupe key). */
+export const CLARIFY_PROPOSAL_MARKER = "empress:clarify-proposal";
+
+/** A planned clarification-proposal side effect: post `comment` on task `taskId`. */
+export interface ClarifyPlan {
+  taskId: number;
+  comment: string;
+}
+
+/** Input to the proposal planner: a not-ready task + the readiness reasons that flagged it. */
+export interface ClarifyPlanCheck {
+  task: Task;
+  reasons: string[];
+}
+
+interface ProposalFrame {
+  intro: string;
+  proposed: string;
+  openQuestions: string;
+}
+
+// Human-visible framing of the proposal comment, keyed by detected language. The
+// template is pinned by docs/design-task-35.md (verbatim match with the pre-split
+// empress_readiness output so already-posted proposals dedupe identically); the
+// spec content itself comes from proposeSpec (taskstore/shared.ts).
+const EN_FRAME: ProposalFrame = {
+  intro: "**[empress]** This task looks under-specified. Here is a **draft spec I inferred from the title** — please **answer the open questions below** in a reply (or confirm / adjust):",
+  proposed: "**Proposed:**",
+  openQuestions: "**Open questions:**",
+};
+const PROPOSAL_FRAME: Record<string, ProposalFrame> = {
+  en: EN_FRAME,
+  ja: {
+    intro: "**[empress]** このタスクは仕様が不足しています。タイトルから推測した**ドラフト仕様**です。以下の**未解決の質問**に**返信で回答**（または確認・修正）してください：",
+    proposed: "**提案（ドラフト）:**",
+    openQuestions: "**未解決の質問:**",
+  },
+};
+
+/**
+ * Pure: draft the full proposal comment for one not-ready task — marker + draft
+ * spec (proposeSpec) + open questions + readiness reasons, in the issue's detected
+ * language. Deterministic; one field per line, numbers for questions.
+ */
+function buildClarifyProposalComment(task: Task, reasons: string[]): string {
+  const lang = detectLanguage(`${task.title || ""} ${task.body || ""}`);
+  const frame = PROPOSAL_FRAME[lang] || EN_FRAME;
+  const p = proposeSpec(task, lang);
+  return [
+    frame.intro,
+    `<!--${CLARIFY_PROPOSAL_MARKER}-->`,
+    "",
+    frame.proposed,
+    `- Purpose: ${p.purpose}`,
+    `- Scope: ${p.scope}`,
+    `- Acceptance Criteria: ${p.acceptance.map((a) => `[ ] ${a}`).join(" ")}`,
+    `- Non-Goals: ${p.nongoals.join(", ")}`,
+    "",
+    frame.openQuestions,
+    ...p.questions.map((q, i) => `${i + 1}. ${q}`),
+    "",
+    `(reason: ${(reasons || []).join("; ")})`,
+  ].join("\n");
+}
+
+/**
+ * Pure (Command planning): for each not-ready task that has NOT already received a
+ * proposal (no `empress:clarify-proposal` marker in its comments), plan one proposal
+ * Command. Skipped tasks produce no Command — this dedupe is what guarantees a
+ * proposal is never posted twice, whoever posted the first one. Empty input → [].
+ */
+export function planClarifyProposals(checks: ClarifyPlanCheck[]): ClarifyPlan[] {
+  const plans: ClarifyPlan[] = [];
+  for (const { task, reasons } of checks) {
+    const hasProposal = (task.comments || []).some((c) => String(c.body || "").includes(CLARIFY_PROPOSAL_MARKER));
+    if (hasProposal) continue;
+    plans.push({ taskId: task.id, comment: buildClarifyProposalComment(task, reasons) });
+  }
+  return plans;
+}
+
+/**
+ * Thin execution shell for the run driver: re-read each check's task fresh (the gh
+ * list backend carries no comments, so dedupe + reply detection need the
+ * authoritative record), execute the planned Commands verbatim (addComment + mark
+ * needs_clarification/blocked — same as empress_readiness), and report which tasks
+ * have a pending human reply: the driver's gate for spawning the clarify LLM pass.
+ */
+export function postClarifyProposals(cwd: string, checks: ClarifyPlanCheck[]): { posted: number; pendingReply: number[] } {
+  let posted = 0;
+  const pendingReply: number[] = [];
+  for (const check of checks) {
+    const fresh = getTask(cwd, check.task.id);
+    if (!fresh) continue;
+    for (const plan of planClarifyProposals([{ task: fresh, reasons: check.reasons }])) {
+      addComment(cwd, plan.taskId, "empress", plan.comment);
+      updateTask(cwd, plan.taskId, { needs_clarification: true, status: "blocked" });
+      posted++;
+    }
+    if (hasHumanReply(fresh)) pendingReply.push(fresh.id);
+  }
+  return { posted, pendingReply };
 }
 
 /**
