@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { EMPRESS_DIR, loadConfig } from "../shared/config.ts";
 import { run } from "../shared/shell.ts";
 import { isGitRepo } from "../domain/git.ts";
+import { hygieneReport, treeHygieneViolations } from "../domain/hygiene.ts";
 import { jevAvailable } from "../domain/jev.ts";
 
 type Check = [name: string, pass: boolean, msg: string];
@@ -43,6 +44,14 @@ export async function doctor(cwd: string) {
     ghOk = ghRes.code === 0;
     checks.push(["gh CLI (github enabled)", ghOk, ghOk ? "" : "required because [github] enabled = true"]);
   }
+
+  // Repo-tree hygiene (Task #54): fail if a gitignored runtime artifact is tracked.
+  const hygieneViolations = treeHygieneViolations(cwd);
+  checks.push([
+    "repo-tree hygiene",
+    hygieneViolations.length === 0,
+    hygieneViolations.length === 0 ? "" : hygieneReport(cwd),
+  ]);
 
   let allOk = true;
   let warnOnly = 0;

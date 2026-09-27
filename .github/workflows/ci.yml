@@ -33,5 +33,14 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Repo-tree hygiene (no tracked gitignored runtime artifacts)
+        run: |
+          V=$(git ls-files -c -i --exclude-standard)
+          if [ -n "$V" ]; then
+            echo "::error::Tracked-but-gitignored runtime artifact(s) in tree: $V. Run 'git rm --cached' on them."
+            exit 1
+          fi
+          echo "repo-tree hygiene: clean"
+
       - name: Run selfcheck (typecheck + unit tests)
         run: bun scripts/selfcheck.ts
