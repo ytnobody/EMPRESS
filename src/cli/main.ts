@@ -166,7 +166,7 @@ function printHelp(ver: string) {
 }
 
 /** Light-weight flag parser. Supports `--flag`, `--flag=value`, and `--flag value`. */
-function parseFlags(args: string[]): Flags {
+export function parseFlags(args: string[]): Flags {
   const out: Flags = {};
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -180,7 +180,10 @@ function parseFlags(args: string[]): Flags {
         // boolean-ish flags
         if (["once", "list", "remove", "force", "all", "help"].includes(key)) {
           out[key] = true;
-        } else if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
+        } else if (i + 1 < args.length) {
+          // string-valued flag: consume the next arg greedily, even if it
+          // starts with `-` (e.g. `--acceptance "- [ ] ..."` must not be
+          // treated as a value-switch nor leak into positionals)
           out[key] = args[++i];
         } else {
           out[key] = true;
