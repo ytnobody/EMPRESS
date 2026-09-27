@@ -5,7 +5,15 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { legacyJsResidue, todoMarkers, oversizedFiles, trackedSecretFiles, collectAuditFindings } from "../src/domain/audit.ts";
+import { execFileSync } from "node:child_process";
+import {
+  legacyJsResidue,
+  todoMarkers,
+  oversizedFiles,
+  trackedSecretFiles,
+  trackedGitignoredPaths,
+  collectAuditFindings,
+} from "../src/domain/audit.ts";
 
 function mkRepo(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "audit-"));
@@ -68,6 +76,111 @@ test("trackedSecretFiles: flags tracked .env-ish entries", (t) => {
   }
   const hits = trackedSecretFiles(root);
   assert.ok(hits.some((h) => h.axis === "secure" && /\.env/.test(h.title)));
+});
+
+// Verifies: a force-committed node_modules (the podman-deps self-poisoning
+// incident, committed as a SYMLINK) is surfaced as a tracked gitignored path —
+// expected from the spec: .gitignore's `node_modules` intends to exclude that
+// path regardless of how it is materialized in the tree.
+test("trackedGitignoredPaths: flags a tracked node_modules symlink", (t) => {
+  const root = mkRepo({ "src/a.ts": "export const a=1;", "keep.js": "x" });
+  let setupOk = false;
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"]);
+    fs.writeFileSync(path.join(root, ".gitignore"), "node_modules\n*.log\n");
+    fs.symlinkSync(path.join(root, "src"), path.join(root, "node_modules"));
+    execFileSync("git", ["-C", root, "add", "-f", "node_modules", "keep.js"]);
+    execFileSync("git", ["-C", root, "commit", "-qm", "x"]);
+    setupOk = true;
+  } catch {
+    // git absent (e.g. CI alpine image): nothing tracked -> skip the spec.
+  }
+  if (!setupOk) {
+    t.skip("git not available in this environment");
+    return;
+  }
+  assert.deepEqual(trackedGitignoredPaths(root), ["node_modules"]);
+});
+
+// Verifies: a file force-committed INSIDE a real gitignored directory (node_modules/)
+// is also surfaced — .gitignore's `node_modules` excludes the whole subtree, not
+// only a top-level symlink.
+test("trackedGitignoredPaths: flags a tracked file under a gitignored dir", (t) => {
+  const root = mkRepo({ "src/a.ts": "export const a=1;", "keep.js": "x" });
+  let setupOk = false;
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"]);
+    fs.writeFileSync(path.join(root, ".gitignore"), "node_modules\n");
+    fs.mkdirSync(path.join(root, "node_modules"));
+    fs.writeFileSync(path.join(root, "node_modules", "inner.js"), "x");
+    execFileSync("git", ["-C", root, "add", "-f", "node_modules/inner.js", "keep.js"]);
+    execFileSync("git", ["-C", root, "commit", "-qm", "x"]);
+    setupOk = true;
+  } catch {
+    t.skip("git not available in this environment");
+    return;
+  }
+  assert.deepEqual(trackedGitignoredPaths(root), ["node_modules/inner.js"]);
+});
+
+// Verifies: a normal, unignored file is NOT flagged — the gate must not (and does
+// not) complain about healthy tracked code.
+test("trackedGitignoredPaths: clean tree is not flagged", (t) => {
+  const root = mkRepo({ "src/a.ts": "export const a=1;", "keep.js": "x" });
+  let setupOk = false;
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"]);
+    fs.writeFileSync(path.join(root, ".gitignore"), "node_modules\n");
+    fs.mkdirSync(path.join(root, "lib"));
+    fs.writeFileSync(path.join(root, "lib", "ok.js"), "x");
+    execFileSync("git", ["-C", root, "add", "."]);
+    execFileSync("git", ["-C", root, "commit", "-qm", "x"]);
+    setupOk = true;
+  } catch {
+    t.skip("git not available in this environment");
+    return;
+  }
+  assert.deepEqual(trackedGitignoredPaths(root), []);
+});
+
+// Verifies: .gitignore matches BOTH a directory and a same-named symlink — git
+// matches the path/pattern, not the on-disk file type, so a `node_modules` symlink
+// is ignored exactly as `node_modules/` is. (The original bug: the pattern ignored
+// only the directory, letting the symlink through to a commit.)
+function gitCheckIgnoreMatches(root, p) {
+  try {
+    execFileSync("git", ["-C", root, "check-ignore", "--no-index", p], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+test("gitignore pattern matches both a dir and a same-named symlink", (t) => {
+  const root = mkRepo({ "keep.js": "x" });
+  let setupOk = false;
+  let dirIgnored = false;
+  let symlinkIgnored = false;
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"]);
+    fs.writeFileSync(path.join(root, ".gitignore"), "node_modules\n");
+    // as a directory:
+    fs.mkdirSync(path.join(root, "node_modules"));
+    dirIgnored = gitCheckIgnoreMatches(root, "node_modules");
+    // as a same-named symlink (replace the directory):
+    fs.rmSync(path.join(root, "node_modules"), { recursive: true });
+    fs.symlinkSync(path.join(root, "keep.js"), path.join(root, "node_modules"));
+    symlinkIgnored = gitCheckIgnoreMatches(root, "node_modules");
+    setupOk = true;
+  } catch {
+    t.skip("git not available in this environment");
+    return;
+  }
+  if (!setupOk) {
+    t.skip("git fixtures could not be constructed");
+    return;
+  }
+  assert.equal(dirIgnored, true);
+  assert.equal(symlinkIgnored, true);
 });
 
 // Verifies: aggregate returns a per-axis summary.

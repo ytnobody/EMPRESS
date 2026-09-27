@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "../src/shared/config.ts";
+import { trackedGitignoredPaths } from "../src/domain/audit.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let failures = 0;
@@ -27,6 +28,19 @@ if (!cfg.file) {
 // Type check (tsc --noEmit): the project is fully typed (371 -> 0); this step
 // makes the zero-error state an enforced rule, not just a snapshot. Requires
 // typescript resolvable (host: devDeps; [ci] container: baked into the image).
+// Repo-tree hygiene gate: hard-fail when a gitignored runtime path (e.g. a
+// committed node_modules symlink) is tracked in the index. This makes the
+// self-poisoning incident an enforced CI rule instead of an incidental failure.
+const hygieneBad = trackedGitignoredPaths(root);
+if (hygieneBad.length) {
+  console.error(
+    `repo-tree hygiene FAIL: tracked gitignore-excluded path(s): ${hygieneBad.join(", ")} — purge them (node_modules symlink poisoning)`
+  );
+  failures++;
+} else {
+  console.log("repo-tree hygiene: PASS");
+}
+
 try {
   execFileSync(process.execPath, ["typecheck"], { stdio: "inherit" });
   console.log("typecheck: PASS");

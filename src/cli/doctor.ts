@@ -5,6 +5,7 @@ import { EMPRESS_DIR, loadConfig } from "../shared/config.ts";
 import { run } from "../shared/shell.ts";
 import { isGitRepo } from "../domain/git.ts";
 import { jevAvailable } from "../domain/jev.ts";
+import { trackedGitignoredPaths } from "../domain/audit.ts";
 
 type Check = [name: string, pass: boolean, msg: string];
 
@@ -34,6 +35,15 @@ export async function doctor(cwd: string) {
 
   const piRes = run("pi", ["--version"]);
   checks.push(["pi available", piRes.code === 0, piRes.code === 0 ? "" : "pi not found"]);
+
+  // Repo-tree hygiene gate: fail when a gitignored runtime path (e.g. a
+  // committed node_modules symlink) is tracked in the index.
+  const hygieneBad = isGitRepo(cwd) ? trackedGitignoredPaths(cwd) : [];
+  checks.push([
+    "no gitignored path tracked (repo-tree hygiene)",
+    hygieneBad.length === 0,
+    hygieneBad.length ? `tracked despite .gitignore excluding it: ${hygieneBad.join(", ")} — purge the commit` : "",
+  ]);
 
   // gh is only needed when the project opted into GitHub ([github] enabled = true).
   const ghEnabled = Boolean(loadConfig(cwd).github?.enabled);

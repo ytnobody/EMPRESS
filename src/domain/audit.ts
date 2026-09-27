@@ -115,6 +115,26 @@ function execGitLsFiles(root: string): string[] {
 }
 
 /**
+ * Tracked paths that .gitignore intends to exclude (a committed runtime
+ * artifact/symlink — e.g. the podman-deps self-poisoning where a node_modules
+ * SYMLINK slipped into a commit because the pattern only matched the dir).
+ * `git ls-files -ci --exclude-standard` is the native, deterministic check;
+ * git's name-matching treats a directory and a same-named symlink identically,
+ * so a force-committed node_modules — dir subtree or symlink — surfaces here.
+ * Empty when git is unavailable (the [ci] alpine image ships no git binary) so
+ * a git-less run is not falsely blocked (host / GitHub Actions git enforces it).
+ */
+export function trackedGitignoredPaths(root: string): string[] {
+  if (!fs.existsSync(path.join(root, ".git"))) return []; // not a git tree: nothing tracked
+  try {
+    const out = execFileSync("git", ["-C", root, "ls-files", "-ci", "--exclude-standard"], { encoding: "utf-8" });
+    return String(out).split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Aggregate deterministic findings for the three axes. `patternTables` reusable
  * from triage (secrets/dangerous) — passed in to keep the dependency explicit.
  */
@@ -125,6 +145,16 @@ export function collectAuditFindings(root: string): { findings: AuditFinding[]; 
     ...oversizedFiles(root),
     ...trackedSecretFiles(root),
   ];
+
+  // Repo-tree hygiene gate: never allow a gitignored runtime path to be tracked.
+  const gitignored = trackedGitignoredPaths(root);
+  if (gitignored.length) {
+    findings.push({
+      axis: "secure",
+      title: `Tracked gitignored path${gitignored.length > 1 ? "s" : ""}: ${gitignored.join(", ")}`,
+      detail: `"${gitignored.join("\", \"")}" is tracked despite .gitignore excluding it — purge the commit (repo-tree hygiene gate)`,
+    });
+  }
 
   const byAxis = (a: string) => findings.filter((f) => f.axis === a).length;
   return {
