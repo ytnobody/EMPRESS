@@ -3,7 +3,7 @@
 // dispatches/falls back correctly using an injected runner — no real container.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildContainerArgs, runCi, runProjectCi, nodeModulesExtraMount, depsRelinkRepair, decidePreflight, nodeModulesHealthy } from "../src/domain/ci.ts";
+import { buildContainerArgs, runCi, runProjectCi, nodeModulesExtraMount, depsRelinkRepair, decidePreflight, nodeModulesHealthy, gitProbeOk } from "../src/domain/ci.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -284,7 +284,7 @@ test("runCi: container path emits a git-in-image probe; clean => not skip-eligib
   const _run = (c, a) => {
     calls.push([c, a]);
     if (c === "podman" && a[0] === "--version") return { code: 0 };
-    if (c === "podman" && a.includes("git")) return { code: 0 }; // git present in image
+    if (c === "podman" && a.includes("git")) return { code: 0, stdout: "git version 2.39.1", stderr: "" }; // real git in image
     return { code: 0, stdout: "", stderr: "" };
   };
   const res = runCi(path.join(base, "wt"), { testCommand: "bun t", engine: "podman", image: "oven/bun:1.4-alpine", _run });
@@ -339,7 +339,7 @@ test("runCi: preflight heals /deps-poisoned link before probing deps", () => {
   const _run = (c, a) => {
     calls.push([c, a]);
     if (c === "podman" && a[0] === "--version") return { code: 0 };
-    if (c === "podman" && a.includes("git")) return { code: 0 };
+    if (c === "podman" && a.includes("git")) return { code: 0, stdout: "git version 2.39.1", stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
   const res = runCi(wt, { testCommand: "bun t", engine: "podman", image: "oven/bun:1.4-alpine", _run });
@@ -365,4 +365,53 @@ test("runProjectCi: returns preflight report", () => {
   const res = runProjectCi(base, config, { _run });
   assert.ok(res.preflight, "preflight present on runProjectCi result");
   assert.equal(typeof res.preflight.skipEligible, "boolean");
+});
+
+// ---------------------------------------------------------------------------
+// Task 59: the probe must not mistake bun's git shim for real git. The CI
+// image's `git` shim can exit 0 printing `Script not found "git"` without ever
+// running git, so `.code === 0` over-reports git availability; gitProbeOk
+// requires genuine `git version N` stdout. (Plain probe result in, boolean out
+// — pure, no process spawned, so assertions are verification arithmetic.)
+// ---------------------------------------------------------------------------
+
+// Verifies: exit 0 AND genuine `git version N` stdout is the only probe result
+// that counts as real git present (host + git-laden containers stay eligible).
+test("gitProbeOk: exit 0 + real git version stdout => true", () => {
+  assert.equal(gitProbeOk({ code: 0, stdout: "git version 2.39.1\n" }), true);
+});
+
+// Verifies: the oven/bun shim (exit 0, `Script not found "git"`, no real git)
+// and any exit-0-without-version output report git-ABSENT, so skipEligible
+// flips true again on git-less images (task #59 AC).
+test("gitProbeOk: shim/empty stdout with exit 0 => false", () => {
+  assert.equal(gitProbeOk({ code: 0, stdout: 'error: Script not found "git"\n' }), false);
+  assert.equal(gitProbeOk({ code: 0, stdout: "" }), false);
+});
+
+// Verifies: a non-zero exit (e.g. real `git: not found`) also reports absent.
+test("gitProbeOk: non-zero exit => false", () => {
+  assert.equal(gitProbeOk({ code: 1, stdout: "git: not found" }), false);
+});
+
+// Verifies: runCi feeds the in-image probe result through gitProbeOk — a shim
+// probe that exits 0 without a git version makes gitAvailable false and
+// skipEligible true (task #59 AC), while the run is still attempted.
+test("runCi: in-image shim probe (exit 0, no git version) => skipEligible true", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ci-g59-"));
+  fs.mkdirSync(path.join(base, "real"));
+  fs.mkdirSync(path.join(base, "wt"), { recursive: true });
+  fs.symlinkSync(path.join(base, "real"), path.join(base, "wt", "node_modules"), "dir");
+  const calls = [];
+  const _run = (c, a) => {
+    calls.push([c, a]);
+    if (c === "podman" && a[0] === "--version") return { code: 0 };
+    if (c === "podman" && a.includes("git")) return { code: 0, stdout: 'Script not found "git"', stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const res = runCi(path.join(base, "wt"), { testCommand: "bun t", engine: "podman", image: "oven/bun:1.4-alpine", _run });
+  assert.equal(res.preflight.gitAvailable, false);
+  assert.equal(res.preflight.skipEligible, true);
+  const runCall = calls.find(([c, a]) => c === "podman" && a[0] === "run" && a.includes("sh"));
+  assert.ok(runCall, "test run still attempted despite git-absent verdict");
 });

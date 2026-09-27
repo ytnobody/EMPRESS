@@ -140,6 +140,18 @@ export function nodeModulesHealthy(cwd: string): boolean {
 }
 
 /**
+ * Pure: is a `git --version` probe result evidence of a REAL git binary?
+ * Exit code alone is not enough — the [ci] oven/bun image's bun `git` shim can
+ * exit 0 printing `Script not found "git"` without ever running git (task #59),
+ * and `git: not found` exits non-zero. Real git always prints `git version N`
+ * on stdout, so that + exit 0 is the only git-present verdict. (No process is
+ * spawned here — a plain data predicate.)
+ */
+export function gitProbeOk(res: { code: number; stdout?: string }): boolean {
+  return res.code === 0 && /^git version \d/.test(String(res.stdout ?? "").trim());
+}
+
+/**
  * Pure decision: the CI-env preflight report. `skipEligible` is true when git is
  * absent in the run environment OR deps are unresolvable — the environment cannot
  * give a trustworthy code verdict, so a failed check there is infra-caused, not
@@ -206,7 +218,8 @@ export function runCi(
     const probe = _run(bin, ["--version"], { cwd });
     const engineReady = probe.code === 0;
     // git-or-skip: probe git INSIDE the image (deterministic env check) — task #4.
-    const gitAvailable = engineReady ? _run(bin, ["run", "--rm", image, "git", "--version"], { cwd }).code === 0 : false;
+    // gitProbeOk (task #59): exit 0 alone over-reports on the bun `git` shim.
+    const gitAvailable = engineReady ? gitProbeOk(_run(bin, ["run", "--rm", image, "git", "--version"], { cwd })) : false;
     const preflight = decidePreflight({ engineReady, gitAvailable, depsHealthy, healed });
     if (engineReady) {
       // When deps are mounted at /deps, first relink /project/node_modules inside
@@ -223,7 +236,7 @@ export function runCi(
   }
 
   // host fallback (engine unconfigured, configured engine unavailable)
-  const hostGit = _run("git", ["--version"], { cwd }).code === 0;
+  const hostGit = gitProbeOk(_run("git", ["--version"], { cwd }));
   const preflightHost = decidePreflight({ engineReady: true, gitAvailable: hostGit, depsHealthy, healed });
   const res = _run("sh", ["-c", testCommand], { cwd });
   return { code: res.code, stdout: String(res.stdout || "").trim(), stderr: String(res.stderr || "").trim(), engine: "host", preflight: preflightHost };
