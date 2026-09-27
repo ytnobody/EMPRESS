@@ -47,6 +47,34 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** True when `index` in `source` sits inside a `//` line or `/*` block comment.
+ *  Conservative on stray `//`/`/*` inside string literals (over-skips, which
+ *  only removes a mutant — never invalidates one). */
+function inComment(source: string, index: number): boolean {
+  let line = false;
+  let block = false;
+  let i = 0;
+  while (i < index) {
+    const c = source[i];
+    if (line) {
+      if (c === "\n") line = false;
+      i++;
+    } else if (block) {
+      if (c === "*" && source[i + 1] === "/") {
+        block = false;
+        i += 2;
+      } else i++;
+    } else if (c === "/" && source[i + 1] === "/") {
+      line = true;
+      i += 2;
+    } else if (c === "/" && source[i + 1] === "*") {
+      block = true;
+      i += 2;
+    } else i++;
+  }
+  return line || block;
+}
+
 /**
  * Replace every standalone occurrence of token `a` with `b`. Operator tokens
  * must not be adjacent to another operator char, so `==` inside `===`/`!==`,
@@ -59,8 +87,22 @@ function swapToken(source: string, a: string, b: string, word = false): string |
   const re = new RegExp(word ? `\\b${esc}\\b` : `(?<![${OP_CHARS}])${esc}(?![${OP_CHARS}])`, "g");
   if (!re.test(source)) return null;
   re.lastIndex = 0;
-  const out = source.replace(re, b);
-  return out === source ? null : out;
+  let out = "";
+  let last = 0;
+  let changed = false;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    out += source.slice(last, m.index);
+    if (inComment(source, m.index)) {
+      out += m[0]; // comment text is behavior-neutral — never mutate it
+    } else {
+      out += b;
+      changed = true;
+    }
+    last = m.index + m[0].length;
+  }
+  out += source.slice(last);
+  return changed ? out : null;
 }
 
 /** Operator-pair table: each entry yields one whole-source mutant (`a`→`b`). */
@@ -102,6 +144,10 @@ function bumpNumeric(source: string): Mutant[] {
   let m: RegExpExecArray | null;
   let offset = 0;
   while ((m = re.exec(source)) !== null) {
+    if (inComment(source, m.index)) {
+      re.lastIndex = m.index + m[1].length; // skip behavior-neutral comment numbers
+      continue;
+    }
     const num = parseInt(m[1], 10);
     const bumped = String(num + 1);
     const mutated = source.slice(0, m.index) + bumped + source.slice(m.index + m[1].length);

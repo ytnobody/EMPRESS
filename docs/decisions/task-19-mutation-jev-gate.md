@@ -20,7 +20,8 @@ is:
     (relational/equality flips both directions, `&&↔||`, `==↔===` strictness,
     `==↔!=`, `+↔-`, `null↔undefined`, `Math.min↔Math.max`, `true↔false`,
     numeric-literal bump). Token-aware swap: composite operators (`===`, `++`,
-    `+=`, `>=`, `&&=`) are never split; word tokens match at word boundaries.
+    `+=`, `>=`, `&&=`) are never split; word tokens match at word boundaries;
+    tokens inside comments are never mutated (behavior-neutral noise).
     The cap comes from `[mutation] max_mutants`. Applied to *behavior-bearing
     source*, not tests.
   - `findTests(cwd)` — map each `src/*.ts` -> its `test/*.test.mjs` via import-scan.

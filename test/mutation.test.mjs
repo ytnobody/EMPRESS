@@ -132,6 +132,25 @@ test("mutation: token-aware swaps never corrupt composite operator tokens", () =
   assert.ok(ids.includes("===->=="), "=== still loosened");
 });
 
+// Verifies: tokens (operators, word literals, numbers) inside comments are never
+// mutated — they are behavior-neutral noise that would only pollute the score —
+// while the same tokens in code still produce mutants.
+test("mutation: comment-located tokens are never mutated", () => {
+  const src = `// a === b && x < 10, threshold 1
+const ok = a === b && x < 10;
+`;
+  const comment = "// a === b && x < 10, threshold 1";
+  const ms = collectMutants(src);
+  assert.ok(ms.length >= 2, `expected several mutants, got ${ms.length}`);
+  for (const m of ms) {
+    assert.ok(m.source.includes(comment), `comment text changed by "${m.id}"`);
+  }
+  // code tokens still mutate
+  const ids = ms.map((m) => m.id);
+  assert.ok(ids.includes("===->!=="), "=== in code still swapped");
+  assert.ok(ids.includes("const+1:10"), "number in code still bumped");
+});
+
 // Verifies: runMutationGate (the shared orchestration behind both the tool and
 // the CI script) reports score + survivors + genuine-gap count and derives the
 // verdict from them, with injectable run/classify so no test ever runs `bun`.
