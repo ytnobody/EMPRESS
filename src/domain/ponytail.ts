@@ -64,15 +64,28 @@ function walk(dir: string, out: PonytailRow[], relBase: string): void {
             i = j; // continuation consumed; skip it in the outer scan
           }
           const body = [m[1].trim(), ...cont].join(" ").trim();
-          let ceiling = body.split(",")[0].trim();
-          let upgrade = body.split(",").slice(1).join(", ").trim();
-          if (!upgrade) {
-            const upIdx = body.search(UPGRADE_KEYWORD);
-            if (upIdx >= 0) {
-              // no comma-split upgrade, but an explicit upgrade prefix is present:
-              // everything before it is the ceiling, everything from it is the upgrade.
-              ceiling = body.slice(0, upIdx).trim() || ceiling;
-              upgrade = body.slice(upIdx).trim();
+          // Split ceiling/upgrade. An explicit "upgrade:"/"upgrade path:" keyword
+          // wins over the comma-split: a comma inside the ceiling must not shadow
+          // it (refactor.ts:33). Otherwise split at the first comma that is NOT
+          // inside parentheses — a comma within a parenthetical is part of the
+          // ceiling (ci.ts:100's "(3 ups, matches createWorktree)").
+          let ceiling = body.trim();
+          let upgrade = "";
+          const upIdx = body.search(UPGRADE_KEYWORD);
+          if (upIdx >= 0) {
+            ceiling = body.slice(0, upIdx).trim().replace(/,\s*$/, "");
+            upgrade = body.slice(upIdx).trim();
+          } else {
+            let depth = 0;
+            for (let i = 0; i < body.length; i++) {
+              const ch = body[i];
+              if (ch === "(") depth++;
+              else if (ch === ")") depth--;
+              else if (ch === "," && depth === 0) {
+                ceiling = body.slice(0, i).trim();
+                upgrade = body.slice(i + 1).trim();
+                break;
+              }
             }
           }
           const noTrigger = !TRIGGER_RE.test(body) || !upgrade;

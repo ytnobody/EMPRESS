@@ -91,6 +91,69 @@ test("ponytail: semicolons do not split the upgrade text", () => {
   }
 });
 
+// Verifies: an explicit "upgrade:" keyword wins over the comma-split even when a
+// comma precedes it inside the ceiling (refactor.ts:33 shape): the upgrade field
+// is exactly the explicit upgrade text, not a comma-slice that also carries the
+// ceiling sentence. Old behavior truncated the ceiling at the first comma and
+// merged the "upgrade:" line into the mangled comma-slice.
+test("ponytail: explicit upgrade: keyword beats a comma earlier in the ceiling", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ponytail-"));
+  try {
+    fs.writeFileSync(
+      path.join(tmp, "r.js"),
+      [
+        "// ponytail: narrow-structural filter, exact behavior-line bag parity — ceiling: misses",
+        "// pure relocations that tweak type-only lines (they stay HIGH),",
+        "// upgrade: token-level AST comparison if those false-pure risks matter.",
+        "x = 1",
+      ].join("\n"),
+    );
+    const out = collectPonytailDebt(tmp);
+    const row = out.rows[0];
+    // spec: upgrade is exactly the explicit keyword body; ceiling is everything
+    // before the keyword (trailing comma dropped), NOT a truncation at the first
+    // comma, which sits inside the ceiling sentence.
+    assert.equal(out.markers, 1);
+    assert.equal(out.noTrigger, 0);
+    assert.equal(row.upgrade, "upgrade: token-level AST comparison if those false-pure risks matter.");
+    assert.ok(row.ceiling.includes("exact behavior-line bag parity"));
+    assert.ok(row.ceiling.endsWith("(they stay HIGH)"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Verifies: a comma inside a parenthetical is part of the ceiling, not a
+// ceiling/upgrade split point (ci.ts:100 shape): the ceiling keeps the full
+// parenthetical "(3 ups, matches createWorktree)" and the upgrade starts after
+// it. With no explicit upgrade keyword the first comma at paren depth 0 (i.e.
+// the comma after the parenthetical closes) separates the upgrade path;
+// no-trigger classification (trigger present + upgrade present) is unchanged.
+test("ponytail: comma inside a parenthetical stays part of the ceiling", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ponytail-"));
+  try {
+    fs.writeFileSync(
+      path.join(tmp, "c.js"),
+      [
+        "// ponytail: depth hardcoded to <main>/.empress/N (3 ups, matches createWorktree),",
+        "// refuse rewrite when the derived main dir is absent; generalize if",
+        "// EMPRESS_DIR ever gets nested or worktrees relocate.",
+        "x = 1",
+      ].join("\n"),
+    );
+    const out = collectPonytailDebt(tmp);
+    const row = out.rows[0];
+    // spec: ceiling keeps "(3 ups, matches createWorktree)" whole (old behavior
+    // truncated it at "(3 ups"); upgrade is the rest of the joined body.
+    assert.equal(out.markers, 1);
+    assert.equal(out.noTrigger, 0); // "if" trigger + upgrade present -> unchanged
+    assert.equal(row.ceiling, "depth hardcoded to <main>/.empress/N (3 ups, matches createWorktree)");
+    assert.equal(row.upgrade, "refuse rewrite when the derived main dir is absent; generalize if EMPRESS_DIR ever gets nested or worktrees relocate.");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // Verifies: a following comment line that is itself a new `ponytail:` marker ends
 // the wrap-join (a marker standing right after another must stay a separate row).
 test("ponytail: a second marker on the next comment line ends the join", () => {
