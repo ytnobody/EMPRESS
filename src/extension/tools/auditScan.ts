@@ -16,7 +16,10 @@ export function register(pi: ExtensionAPI) {
       const lines: string[] = [r.summary, "", ...r.findings.map((f) => `[${f.axis}] ${f.title} — ${f.detail}`)];
       // Auto-prune stale merged local branches (safe delete) instead of filing a
       // housekeeping task for them — dead merged branches are cleaned up by the
-      // harness itself. protects current branch + base + main + develop.
+      // harness itself. Default sweep protects current branch + base + main +
+      // develop AND any branch checked out in an EMPRESS-managed worktree (an
+      // in-progress engineer task whose branch still points at base). Only
+      // stray/foreign-worktree or worktree-less merged branches are pruned.
       const base = cfg().project.base_branch || "develop";
       const pr = pruneStaleMergedBranches(cwd, base);
       if (pr.pruned.length) lines.push("", `Pruned ${pr.pruned.length} stale merged local branch(es): ${pr.pruned.join(", ")}`);

@@ -174,24 +174,58 @@ export function worktreesForBranch(cwd: string, branch: string): string[] {
 }
 
 /**
+ * True when the worktree at `wtPath` lives under `<cwd>/.empress/worktrees/`
+ * (i.e. it is an EMPRESS-managed task worktree, not a stray/foreign one created
+ * elsewhere). Paths are resolved so they compare independent of `..`/`.`
+ * spelling. Used by the default sweep to protect active task worktrees.
+ */
+function isManagedWorktree(cwd: string, wtPath: string): boolean {
+  const managedDir = path.resolve(path.join(cwd, EMPRESS_DIR, "worktrees"));
+  return path.resolve(wtPath).startsWith(managedDir + path.sep);
+}
+
+/**
  * Safely delete local branches that are fully merged into `base` and are not
  * protected (the current branch, the base branch itself, `main`, `develop`, or
- * names passed via `keep`). Uses `git branch -d` (safe delete): a branch that is
- * not fully merged or is the current branch is skipped rather than force-deleted.
- * A merged branch that is checked out in a worktree has that worktree removed
- * first (`git worktree remove --force`) so `git branch -d` succeeds and leaves no
- * orphaned worktree behind. Deterministic and merge-safe — this is what lets the
- * harness auto-prune dead branches (+ their worktrees) instead of filing a
- * housekeeping task for them.
+ * names passed via `keep`) and — critically — not checked out in an
+ * EMPRESS-managed worktree (unless explicitly listed in `scope`). Uses `git
+ * branch -d` (safe delete): a branch that is not fully merged or is the current
+ * branch is skipped rather than force-deleted. A merged branch that is checked
+ * out in a worktree has that worktree removed first (`git worktree remove
+ * --force`) so `git branch -d` succeeds and leaves no orphaned worktree behind.
+ * Deterministic and merge-safe — this is what lets the harness auto-prune dead
+ * branches (+ their worktrees) instead of filing a housekeeping task for them.
+ *
+ * DEFAULT-SWEEP SAFETY: a branch checked out in an EMPRESS-managed worktree
+ * (under `<cwd>/${EMPRESS_DIR}/worktrees/`) is always protected in a default
+ * sweep, because that branch may be an ACTIVE in-progress engineer task whose
+ * branch still points at `base` (zero commits → `merge-base --is-ancestor` is
+ * true). Only stray/foreign worktrees (or branches with no worktree at all) are
+ * auto-pruned. A caller that has CONFIRMED a managed-worktree branch is a
+ * leftover can list it in `opts.scope` to opt into pruning it (worktree removal
+ * still applies), which is the #64 targeted-execution path.
  */
-export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep?: string[] } = {}): BranchPruneResult {
+export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep?: string[]; scope?: string[] } = {}): BranchPruneResult {
   const keep = new Set<string>([...(opts.keep || []), "main", "develop", base]);
   const current = currentBranch(cwd);
   if (current) keep.add(current);
-  const candidates = listBranches(cwd).filter((b) => !keep.has(b));
+  const explicitScope = opts.scope && opts.scope.length ? opts.scope : null;
+  const candidates = explicitScope
+    ? explicitScope.filter((b) => !keep.has(b))
+    : listBranches(cwd).filter((b) => !keep.has(b));
   const pruned: string[] = [];
   const skipped: string[] = [];
   for (const b of candidates) {
+    // Default sweep (no explicit scope) must never kill an in-progress EMPRESS
+    // task worktree: a branch checked out in a managed `.empress/worktrees/*`
+    // worktree is protected unless the caller confirms it via `scope`.
+    if (!explicitScope) {
+      const inManagedWorktree = worktreesForBranch(cwd, b).some((wt) => isManagedWorktree(cwd, wt));
+      if (inManagedWorktree) {
+        skipped.push(b);
+        continue;
+      }
+    }
     // pruned iff the branch is already an ancestor of base (fully merged in).
     const mergedIn = run("git", ["-C", cwd, "merge-base", "--is-ancestor", b, base]).code === 0;
     if (!mergedIn) {
@@ -199,8 +233,11 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
       continue;
     }
     // free the branch if it is checked out in a worktree so `branch -d` succeeds,
-    // and so no orphaned worktree is left behind after the prune.
+    // and so no orphaned worktree is left behind after the prune. Never remove
+    // the main repo dir itself (only ever listed for the current branch, which is
+    // protected above).
     for (const wt of worktreesForBranch(cwd, b)) {
+      if (path.resolve(wt) === path.resolve(cwd)) continue;
       run("git", ["-C", cwd, "worktree", "remove", "--force", wt]);
     }
     const res = run("git", ["-C", cwd, "branch", "-d", b]);

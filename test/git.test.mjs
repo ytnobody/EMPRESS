@@ -82,6 +82,9 @@ test("pruneStaleMergedBranches: deletes merged, keeps unmerged + protected", (t)
 // unblocks `git branch -d`. (Spec: merged branches get cleaned up in full, not
 // left dangling because a live worktree holds the branch checkout.) The worktree
 // dir no longer exists after pruning. This is the #64 housekeeping behavior.
+// Note: this worktree is a STRAY (non-managed) one — it is not under
+// `.empress/worktrees/` — so a default sweep prunes it. (Managed worktrees are
+// protected; see the next test.)
 test("pruneStaleMergedBranches: merged branch checked out in a worktree is pruned AND its worktree removed", (t) => {
   if (!gitAvailable()) {
     t.skip("git not available");
@@ -111,6 +114,80 @@ test("pruneStaleMergedBranches: merged branch checked out in a worktree is prune
     const names = execFileSync("git", ["-C", dir, "branch", "--format=%(refname:short)"], { encoding: "utf-8" }).split("\n").filter(Boolean);
     assert.ok(!names.includes("empress/task-32"));
     assert.deepEqual(worktreesForBranch(dir, "empress/task-32"), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Verifies (hold-fix / default-sweep safety): a merged branch checked out in an
+// EMPRESS-MANAGED worktree (under `<dir>/.empress/worktrees/`) is NEVER pruned by
+// a DEFAULT sweep. Such a branch may be an ACTIVE in-progress engineer task whose
+// branch still points at `develop` (zero commits -> `merge-base --is-ancestor` is
+// true even though it is not a leftover). The default sweep must not kill its
+// worktree or delete its branch. (Spec: a default sweep can never kill an
+// in-progress EMPRESS task worktree.)
+test("pruneStaleMergedBranches: default sweep protects a merged branch in a managed .empress/worktrees worktree", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-git-mgd-"));
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe", encoding: "utf-8" });
+  try {
+    g(["init", "-q", "-b", "develop"]);
+    g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+    g(["commit", "-q", "--allow-empty", "-m", "A"]);
+    g(["checkout", "-q", "-b", "empress/task-64"]);
+    g(["commit", "-q", "--allow-empty", "-m", "B"]);
+    g(["checkout", "-q", "develop"]);
+    g(["merge", "-q", "empress/task-64", "-m", "merge B"]); // fully merged
+    // check it out in an EMPRESS-managed worktree (like the harness creates).
+    const wt = path.join(dir, ".empress", "worktrees", "64");
+    fs.mkdirSync(path.dirname(wt), { recursive: true });
+    g(["worktree", "add", "-q", wt, "empress/task-64"]);
+    assert.ok(fs.existsSync(path.join(wt, ".git")), "managed worktree fixture exists");
+
+    const res = pruneStaleMergedBranches(dir, "develop"); // DEFAULT sweep
+    assert.ok(!res.pruned.includes("empress/task-64"), `managed-worktree branch must NOT be auto-pruned, got ${res.pruned}`);
+    assert.ok(res.skipped.includes("empress/task-64"), "managed-worktree branch reported skipped/protected");
+    // worktree AND branch both intact after the default sweep
+    assert.ok(fs.existsSync(path.join(wt, ".git")), "managed worktree dir NOT removed by default sweep");
+    const names = execFileSync("git", ["-C", dir, "branch", "--format=%(refname:short)"], { encoding: "utf-8" }).split("\n").filter(Boolean);
+    assert.ok(names.includes("empress/task-64"), "managed-worktree branch kept");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Verifies: a caller who has CONFIRMED a merged branch in a managed worktree is a
+// leftover can opt into pruning it via `opts.scope` — the managed-worktree
+// protection applies only to an un-scoped DEFAULT sweep, not to an explicit
+// targeted run. The worktree is removed and the branch deleted. This is the #64
+// targeted-execution path for `empress/task-32` / `tmp34`.
+test("pruneStaleMergedBranches: explicit scope prunes a confirmed merged branch even inside a managed worktree", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-git-scope-"));
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe", encoding: "utf-8" });
+  try {
+    g(["init", "-q", "-b", "develop"]);
+    g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+    g(["commit", "-q", "--allow-empty", "-m", "A"]);
+    g(["checkout", "-q", "-b", "empress/task-32"]);
+    g(["commit", "-q", "--allow-empty", "-m", "B"]);
+    g(["checkout", "-q", "develop"]);
+    g(["merge", "-q", "empress/task-32", "-m", "merge B"]); // fully merged
+    const wt = path.join(dir, ".empress", "worktrees", "32");
+    fs.mkdirSync(path.dirname(wt), { recursive: true });
+    g(["worktree", "add", "-q", wt, "empress/task-32"]);
+
+    const res = pruneStaleMergedBranches(dir, "develop", { scope: ["empress/task-32"] });
+    assert.ok(res.pruned.includes("empress/task-32"), `scoped confirmed leftover pruned, got ${res.pruned}`);
+    assert.ok(!fs.existsSync(wt), "managed worktree removed by scoped prune");
+    const names = execFileSync("git", ["-C", dir, "branch", "--format=%(refname:short)"], { encoding: "utf-8" }).split("\n").filter(Boolean);
+    assert.ok(!names.includes("empress/task-32"));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
