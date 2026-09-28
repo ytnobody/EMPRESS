@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, proposeSpec, detectLanguage } from "../src/domain/taskstore.js";
+import { localTaskStore, ghTaskStore, issueToTask, desiredLabels, buildGhBody, buildMarkdown, stripMetadata, getTaskStore, hasHumanReply, proposeSpec, detectLanguage, resolveLang, issueLang, CLARIFY_FRAME } from "../src/domain/taskstore.js";
 import { addComment, updateTask, getTask, closeTask, listTasks, removeTask } from "../src/domain/tasks.js";
 import { DEFAULTS } from "../src/shared/config.js";
 
@@ -132,6 +132,61 @@ test("taskstore: detectLanguage + proposeSpec localize for Japanese issues", () 
   const p = proposeSpec({ title: "導入手順をドキュメントにかく" }, "ja");
   assert.ok(p.purpose.includes("導入手順をドキュメントにかく"));
   assert.ok(p.questions[0].includes("導入手順をドキュメントにかく"));
+});
+
+// ---------------------------------------------------------------------------
+// Language-aware output across the harness (task #34)
+// ---------------------------------------------------------------------------
+test("taskstore: resolveLang picks a detected CJK language over the project default", () => {
+  // Verifies: a clear ja/zh/ko detection from the issue always wins, whatever
+  // the [project] language — the harness replies in the issue's language.
+  assert.equal(resolveLang("ja", "en"), "ja");
+  assert.equal(resolveLang("zh", "en"), "zh");
+  assert.equal(resolveLang("ko", "ja"), "ko");
+});
+
+test("taskstore: resolveLang makes [project] language the default for ambiguous en/unknown", () => {
+  // Verifies: the detector's 'en' slot (English issue OR unknown script) is the
+  // ambiguous case; [project] language fills it as the default (default en).
+  // [ASSUMPTION] a genuinely-English issue under a non-en [project] language
+  // gets the project language — detectLanguage cannot separate English from
+  // unrecognized-script issues (both return 'en').
+  assert.equal(resolveLang("en", "en"), "en");
+  assert.equal(resolveLang("en", "ja"), "ja");
+  assert.equal(resolveLang("en", ""), "en");
+});
+
+test("taskstore: issueLang resolves end-to-end for a task (detect + project default)", () => {
+  // Verifies: the composition callers use for issue-bound output — a Japanese
+  // issue resolves to ja in an en-default project; a title-less or English task
+  // falls back to the [project] language.
+  assert.equal(issueLang("導入手順のドキュメント", "", "en"), "ja");
+  assert.equal(issueLang("Bump deps", "# Bump deps", "en"), "en");
+  assert.equal(issueLang("", "", "ja"), "ja");
+  assert.equal(issueLang("", "", ""), "en");
+});
+
+test("taskstore: proposeSpec localizes for Chinese and Korean issues (no English fallback)", () => {
+  // Verifies: zh/ko issues get a clarification proposal drafted in their own
+  // language (anchored by the issue title), not the English template.
+  const zh = proposeSpec({ title: "启动时加速" }, "zh");
+  assert.ok(zh.purpose.includes("启动时加速"));
+  assert.ok(zh.questions[0].includes("为什么"));
+  assert.ok(!/What should/.test(zh.questions[0]));
+  const ko = proposeSpec({ title: "시작 속도 개선" }, "ko");
+  assert.ok(ko.purpose.includes("시작 속도 개선"));
+  assert.ok(ko.questions[0].includes("무엇을"));
+  assert.ok(!/What should/.test(ko.questions[0]));
+});
+
+test("taskstore: CLARIFY_FRAME covers every supported language", () => {
+  // Verifies: the readiness hearing frame exists for en/ja/zh/ko — a Chinese or
+  // Korean task never gets an English framing string around its proposal.
+  for (const lang of ["en", "ja", "zh", "ko"]) {
+    assert.ok(CLARIFY_FRAME[lang], `CLARIFY_FRAME[${lang}]`);
+    assert.ok(CLARIFY_FRAME[lang].header.includes("[empress]"));
+    assert.ok(CLARIFY_FRAME[lang].questions.length > 0);
+  }
 });
 
 test("taskstore: buildMarkdown derives Purpose/Scope from title when omitted (no _to be filled_ stubs)", () => {

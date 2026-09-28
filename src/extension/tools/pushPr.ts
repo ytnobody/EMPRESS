@@ -1,7 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ghAvailable, pushBranchAndCreatePr } from "../../domain/github.ts";
-import { addComment, getTask, updateTask } from "../../domain/tasks.ts";
+import { addComment, getTask, updateTask, issueLang } from "../../domain/tasks.ts";
+import { agentL10n } from "../../domain/l10n.ts";
 import { cfg, projectDir, reply } from "./helpers.ts";
 
 export function register(pi: ExtensionAPI) {
@@ -35,7 +36,8 @@ export function register(pi: ExtensionAPI) {
       );
       if (res.ok && res.prUrl) {
         updateTask(cwd, params.id, { pr: res.prUrl });
-        addComment(cwd, params.id, "empress", `PR opened: ${res.prUrl}`);
+        const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
+        addComment(cwd, params.id, "empress", l.prOpened(res.prUrl));
       }
       return reply(JSON.stringify(res));
     },

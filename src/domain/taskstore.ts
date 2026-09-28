@@ -12,7 +12,10 @@ export {
   buildMarkdown,
   hasHumanReply,
   detectLanguage,
+  resolveLang,
+  issueLang,
   proposeSpec,
+  CLARIFY_FRAME,
   taskBrief,
 } from "./taskstore/shared.ts";
 export { readTaskFile, listTaskFiles, localTaskStore } from "./taskstore/local.ts";
