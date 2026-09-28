@@ -114,6 +114,60 @@ test("ponytail: a second marker on the next comment line ends the join", () => {
   }
 });
 
+// Verifies: an explicit "upgrade:"/"Upgrade path:" paragraph that opens on a
+// SEPARATE comment paragraph AFTER the marker sentence's terminal '.' is still
+// joined into the marker body, so its upgrade path is captured and the marker
+// is NOT falsely flagged no-trigger (taskstore/shared.ts:202 case).
+test("ponytail: joins an upgrade paragraph that follows the marker sentence's terminal dot", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ponytail-"));
+  try {
+    fs.writeFileSync(
+      path.join(tmp, "t.js"),
+      [
+        "// ponytail: detection is marker-presence — the UUID nonce is not verified",
+        "// against a registry and comments predating this change are treated as human.",
+        "// Upgrade path: track posted agent comment ids (repo body metadata) if",
+        "// deliberate marker forgery or rollover over pre-marker threads ever matters.",
+        "x = 1",
+      ].join("\n"),
+    );
+    const out = collectPonytailDebt(tmp);
+    const row = out.rows[0];
+    assert.equal(out.markers, 1);
+    assert.equal(out.noTrigger, 0); // the following-paragraph upgrade path is no longer missed
+    assert.ok(row.ceiling.includes("treated as human."));
+    assert.ok(row.upgrade.includes("Upgrade path: track posted agent comment ids"));
+    assert.ok(row.upgrade.includes("ever matters."));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Verifies: a following standalone note with NO upgrade keyword after a marker's
+// terminal '.' is still NOT swallowed into the body (sentence-boundary preserved),
+// and a marker whose body carries a trigger word but genuinely names no upgrade
+// path (no comma, no explicit upgrade prefix) is still flagged no-trigger.
+test("ponytail: non-upgrade following note stays separate and no-upgrade markers stay flagged", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ponytail-"));
+  try {
+    fs.writeFileSync(
+      path.join(tmp, "n.js"),
+      [
+        "// ponytail: quick hack.",
+        "// unrelated note, must not be joined",
+        "x = 1",
+      ].join("\n"),
+    );
+    const out = collectPonytailDebt(tmp);
+    const row = out.rows[0];
+    assert.equal(out.noTrigger, 1);
+    assert.equal(row.upgrade, "(none)");
+    assert.ok(!row.ceiling.includes("unrelated note"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // Verifies: node_modules is skipped, so a marker buried there is NOT counted.
 test("ponytail: skips node_modules", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ponytail-"));

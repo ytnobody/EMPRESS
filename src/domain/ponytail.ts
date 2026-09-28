@@ -9,6 +9,8 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", ".cac
 const MARKER = /(?:#|\/\/)\s?ponytail:\s*(.*)$/i;
 const CONT_LINE = /^\s*(?:\/\/|#)\s*/; // a following comment line may be a wrapped continuation
 const TRIGGER_RE = /(if|when|until|once|if\/|upgrade|revisit|later)/i;
+const UPGRADE_PREFIX = /^upgrade\s*(?:path)?\s*:/i; // explicit upgrade paragraph opener
+const UPGRADE_KEYWORD = /upgrade\s*(?:path)?\s*:/i; // search anywhere in a joined body
 
 export interface PonytailRow {
   file: string;
@@ -41,21 +43,38 @@ function walk(dir: string, out: PonytailRow[], relBase: string): void {
           if (!m) continue;
           const markerLine = i; // row reports the marker's first line
           // Join wrapped continuation comment lines (marker text spilled onto the
-          // next comment line). Stop after a sentence ends so a following
-          // standalone comment is not swallowed; stop at a new ponytail: marker.
+          // next comment line). Stop after a non-upgrade paragraph so a following
+          // standalone comment is not swallowed; resume joining for an explicit
+          // "upgrade:"/"upgrade path:" paragraph that opens AFTER the marker
+          // sentence's terminal '.'. Stop at a new ponytail: marker.
           const cont: string[] = [];
+          let sentenceEnded = /[.!?]$/.test(m[1].trim()); // marker's own sentence may already have ended
+          let upgradePara = false;   // inside an explicitly prefixed upgrade paragraph
           for (let j = i + 1; j < lines.length; j++) {
             const c = CONT_LINE.exec(lines[j]);
             if (!c) break;
             const t = lines[j].slice(c[0].length).trim();
             if (/^ponytail:/i.test(t)) break;
+            if (sentenceEnded && !upgradePara) {
+              if (!UPGRADE_PREFIX.test(t)) break; // non-upgrade standalone note -> stop
+              upgradePara = true; // explicit upgrade paragraph opens across the break
+            }
             cont.push(t);
-            if (/[.!?]$/.test(t)) break;
+            if (/[.!?]$/.test(t)) sentenceEnded = true;
             i = j; // continuation consumed; skip it in the outer scan
           }
           const body = [m[1].trim(), ...cont].join(" ").trim();
-          const [ceiling, ...rest] = body.split(",").map((s) => s.trim());
-          const upgrade = rest.join(", ");
+          let ceiling = body.split(",")[0].trim();
+          let upgrade = body.split(",").slice(1).join(", ").trim();
+          if (!upgrade) {
+            const upIdx = body.search(UPGRADE_KEYWORD);
+            if (upIdx >= 0) {
+              // no comma-split upgrade, but an explicit upgrade prefix is present:
+              // everything before it is the ceiling, everything from it is the upgrade.
+              ceiling = body.slice(0, upIdx).trim() || ceiling;
+              upgrade = body.slice(upIdx).trim();
+            }
+          }
           const noTrigger = !TRIGGER_RE.test(body) || !upgrade;
           out.push({
             file: rel,

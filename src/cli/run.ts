@@ -136,8 +136,8 @@ function runPass({ cwd, config, model, thinking, audit = false, mode = "run", cl
     // Debounce timer re-armed on every output; the kill decision is delegated to
     // the pure shouldStallKill.
     // ponytail: I/O-activity only (no CPU/proc accounting) — a pass that spins CPU
-    // with zero output is caught only by pass_timeout; add per-pid/cpu sampling of
-    // the child if that case ever matters.
+    // with zero output is caught only by pass_timeout.
+    // upgrade: add per-pid/cpu sampling of the child if pass-spinning ever matters.
     const stallMs = Math.max(1, Number(config.run?.pass_stall_seconds ?? 300)) * 1000;
     let lastActivityAt = Date.now();
     const armStall = () => {
