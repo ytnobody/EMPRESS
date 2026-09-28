@@ -6,7 +6,7 @@ import { run } from "../../shared/shell.ts";
 import type { LoadedConfig } from "../../shared/config.ts";
 import { resolveRepo, type GithubConfig } from "../github.ts";
 import { localTaskStore } from "./local.ts";
-import { buildMarkdown, withAgentMarker, type StoreDeps, type Task, type TaskInput, type TaskListOpts, type TaskStore, type TaskComment } from "./shared.ts";
+import { buildMarkdown, withAgentMarker, isAgentAuthor, type StoreDeps, type Task, type TaskInput, type TaskListOpts, type TaskStore, type TaskComment } from "./shared.ts";
 
 // EMPRESS-internal labels (kept out of the user-visible labels array).
 const LBL_INPROGRESS = "status:in-progress";
@@ -181,8 +181,9 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
 
   const addComment: TaskStore["addComment"] = (id, author, body) => {
     // Readable **[agent]** prefix for humans + invisible machine marker for
-    // hasHumanReply (task #32) — the marker is the only agent signal.
-    const marked = withAgentMarker(`**[${author}]** ${body}`);
+    // hasHumanReply (task #32) — the marker is the only agent signal and is
+    // reserved for harness-agent authors (gh posts are all agent-authored here).
+    const marked = isAgentAuthor(author) ? withAgentMarker(`**[${author}]** ${body}`) : `**[${author}]** ${body}`;
     const post = gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=${marked}`], 60000);
     if (post.code !== 0) return null;
     return get(id);

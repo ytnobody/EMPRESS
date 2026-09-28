@@ -27,8 +27,15 @@ The prefix must stay (humans read it) but detection must no longer depend on it.
 |---|---|
 | `agentMarker(): string` | `<!--empress:agent=<uuid v4>-->` (unique per call) |
 | `hasHumanReply(t)` | agent iff last comment body contains `/<!--empress:agent=/` |
-| gh `addComment` Command | `gh api repos/<repo>/issues/<id>/comments --method POST -f body=**[<author>]** <body>\n<marker>` |
-| local `addComment` | stored comment `{at, author, body: <body>\n<marker>}` |
+| gh `addComment` Command | `gh api repos/<repo>/issues/<id>/comments --method POST -f body=**[<author>]** <body>` (+ `\n<marker>` only when author is a harness agent) |
+| local `addComment` | stored comment `{at, author, body: <body>` (+ `\n<marker>` only when author is a harness agent) `}` |
+
+The marker is **gated by author**: only harness-agent authors
+(`empress`/`superintendent`/`engineer`) receive `withAgentMarker`. A human-authored
+local comment (author not in `AGENT_AUTHORS`) is stored with the readable
+`**[agent]**` prefix only, never the marker — so it is (correctly) detected as a
+human reply. In gh mode every harness post is agent-authored, so behavior there is
+unchanged by the gate.
 
 ## Verification table (hasHumanReply)
 | last comment body | result |

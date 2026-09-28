@@ -25,6 +25,18 @@ export function withAgentMarker(body: string): string {
 
 const AGENT_MARKER_RE = /<!--empress:agent=/;
 
+/** Harness agent authors whose comments carry the machine marker. The marker
+ * is reserved for harness-posted comments; a HUMAN author (posted through the
+ * local store) must NOT receive it, else a human reply would be misread as an
+ * agent comment (task #32). Humans are distinguished by the readable
+ * `**[agent]**` prefix, never the marker. */
+export const AGENT_AUTHORS = new Set(["empress", "superintendent", "engineer"]);
+
+/** True when the comment author is a harness agent (marker-eligible). */
+export function isAgentAuthor(author: string): boolean {
+  return AGENT_AUTHORS.has(author);
+}
+
 export const TASK_STATUSES: string[] = ["open", "assigned", "in-progress", "done", "blocked"];
 
 export interface TaskComment {
