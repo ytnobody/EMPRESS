@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pruneStaleMergedBranches, decideRemotePrunes } from "../src/domain/git.js";
+import { pruneStaleMergedBranches, decideRemotePrunes, worktreesForBranch } from "../src/domain/git.js";
 
 function gitAvailable() {
   try {
@@ -72,6 +72,76 @@ test("pruneStaleMergedBranches: deletes merged, keeps unmerged + protected", (t)
     const names = execFileSync("git", ["-C", dir, "branch", "--format=%(refname:short)"], { encoding: "utf-8" }).split("\n").filter(Boolean);
     assert.ok(!names.includes("empress/test-9000"));
     assert.ok(names.includes("empress/test-unmerged"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Verifies: a merged branch that is checked OUT in a worktree is also pruned —
+// before pruning, its worktree is removed (`git worktree remove --force`), which
+// unblocks `git branch -d`. (Spec: merged branches get cleaned up in full, not
+// left dangling because a live worktree holds the branch checkout.) The worktree
+// dir no longer exists after pruning. This is the #64 housekeeping behavior.
+test("pruneStaleMergedBranches: merged branch checked out in a worktree is pruned AND its worktree removed", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-git-wt-"));
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe", encoding: "utf-8" });
+  try {
+    g(["init", "-q", "-b", "develop"]);
+    g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+    g(["commit", "-q", "--allow-empty", "-m", "A"]);
+    g(["checkout", "-q", "-b", "empress/task-32"]);
+    g(["commit", "-q", "--allow-empty", "-m", "B"]);
+    // merge back into develop (branch fully merged)
+    g(["checkout", "-q", "develop"]);
+    g(["merge", "-q", "empress/task-32", "-m", "merge B"]);
+    // check it out in a worktree so it is NOT the current/main checkout
+    const wt = path.join(dir, "wt32");
+    g(["worktree", "add", "-q", wt, "empress/task-32"]);
+    assert.ok(fs.existsSync(path.join(wt, ".git")), "worktree fixture exists");
+    assert.deepEqual(worktreesForBranch(dir, "empress/task-32"), [wt]);
+
+    const res = pruneStaleMergedBranches(dir, "develop");
+    assert.ok(res.pruned.includes("empress/task-32"), `merged+checked-out branch pruned, got ${res.pruned}`);
+    assert.ok(!fs.existsSync(wt), "worktree dir removed by pruning");
+    // branch gone, worktree gone
+    const names = execFileSync("git", ["-C", dir, "branch", "--format=%(refname:short)"], { encoding: "utf-8" }).split("\n").filter(Boolean);
+    assert.ok(!names.includes("empress/task-32"));
+    assert.deepEqual(worktreesForBranch(dir, "empress/task-32"), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Verifies: worktreesForBranch maps only the worktrees that check out the given
+// branch. The main worktree is included when it checks the branch (here, develop
+// is checked out in the main repo dir), while worktrees on other branches and
+// branches with no worktree are excluded. Derived from `git worktree list
+// --porcelain` (branch ref -> worktree path).
+test("worktreesForBranch: maps branch->worktree paths", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-git-wtmap-"));
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe", encoding: "utf-8" });
+  try {
+    g(["init", "-q", "-b", "develop"]);
+    g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+    g(["commit", "-q", "--allow-empty", "-m", "A"]);
+    g(["checkout", "-q", "-b", "empress/task-32"]);
+    g(["commit", "-q", "--allow-empty", "-m", "B"]);
+    g(["checkout", "-q", "develop"]);
+    const wt = path.join(dir, "wt32");
+    g(["worktree", "add", "-q", wt, "empress/task-32"]);
+    // only the matching worktree for task-32; develop is the main repo dir;
+    // a branch with no worktree maps to nothing.
+    assert.deepEqual(worktreesForBranch(dir, "empress/task-32"), [wt]);
+    assert.deepEqual(worktreesForBranch(dir, "develop"), [dir]);
+    assert.deepEqual(worktreesForBranch(dir, "nonexistent"), []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

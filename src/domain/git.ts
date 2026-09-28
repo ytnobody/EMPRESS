@@ -154,12 +154,34 @@ export function mergeConflict(cwd: string, base: string, branch: string): boolea
 }
 
 /**
+ * Worktree paths where the given local branch is checked out, parsed from
+ * `git worktree list --porcelain` ("worktree <path>" / "branch refs/heads/<b>").
+ * Returns the main worktree too if it checks out the branch; empty when the
+ * branch is not checked out anywhere.
+ */
+export function worktreesForBranch(cwd: string, branch: string): string[] {
+  const porcelain = run("git", ["-C", cwd, "worktree", "list", "--porcelain"]).stdout;
+  const paths: string[] = [];
+  let cur: string | null = null;
+  for (const line of porcelain.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      cur = line.slice("worktree ".length);
+    } else if (line.startsWith("branch refs/heads/") && cur) {
+      if (line.slice("branch refs/heads/".length) === branch) paths.push(cur);
+    }
+  }
+  return paths;
+}
+
+/**
  * Safely delete local branches that are fully merged into `base` and are not
  * protected (the current branch, the base branch itself, `main`, `develop`, or
  * names passed via `keep`). Uses `git branch -d` (safe delete): a branch that is
- * not fully merged, is checked out (e.g. in a live worktree), or is the current
- * branch is skipped rather than force-deleted. Deterministic and merge-safe —
- * this is what lets the harness auto-prune dead branches instead of filing a
+ * not fully merged or is the current branch is skipped rather than force-deleted.
+ * A merged branch that is checked out in a worktree has that worktree removed
+ * first (`git worktree remove --force`) so `git branch -d` succeeds and leaves no
+ * orphaned worktree behind. Deterministic and merge-safe — this is what lets the
+ * harness auto-prune dead branches (+ their worktrees) instead of filing a
  * housekeeping task for them.
  */
 export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep?: string[] } = {}): BranchPruneResult {
@@ -176,9 +198,14 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
       skipped.push(b);
       continue;
     }
+    // free the branch if it is checked out in a worktree so `branch -d` succeeds,
+    // and so no orphaned worktree is left behind after the prune.
+    for (const wt of worktreesForBranch(cwd, b)) {
+      run("git", ["-C", cwd, "worktree", "remove", "--force", wt]);
+    }
     const res = run("git", ["-C", cwd, "branch", "-d", b]);
     if (res.code === 0) pruned.push(b);
-    else skipped.push(b); // checked out in a worktree, or on a non-fast-forward head
+    else skipped.push(b); // non-fast-forward head / could not be safely deleted
   }
   return { pruned, skipped };
 }
