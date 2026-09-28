@@ -312,7 +312,11 @@ export async function runMutationGate(
   const { genuine, note } = await classify(survivors);
   const jevNote = survivors.length ? note : "no survivors";
   const score = reports.length ? reports.reduce((a, r) => a + r.score, 0) / reports.length : 1;
-  const ok = lowFiles.length === 0 && genuine === 0;
+  // Jev-available => survivors are classified: only a GENUINE gap holds the gate (a
+  // low score whose survivors are all equivalent/benign is tolerated). Without Jev,
+  // no classification is possible so keep the conservative min-score gate.
+  const jevClassified = /^classified \d+ survivor\(s\)$/.test(note);
+  const ok = jevClassified ? genuine === 0 : lowFiles.length === 0 && genuine === 0;
   return { reports, survivors, lowFiles, genuine, jevNote, score, ok };
 }
 

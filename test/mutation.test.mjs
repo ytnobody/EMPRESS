@@ -207,3 +207,50 @@ test("mutation: runMutations honors maxMutants cap", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+// runMutationGate ok-decision (Task #36 refinement / B): Jev-classified survivors
+// tolerate a low score; without Jev the min_score gates; a genuine gap always holds.
+
+function mutProject() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-mutg-"));
+  fs.mkdirSync(path.join(dir, "src", "domain"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "test"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "domain", "foo.ts"), SRC);
+  fs.writeFileSync(path.join(dir, "test", "foo.test.mjs"), 'import { f } from "../src/domain/foo.js";\n');
+  return dir;
+}
+
+test("mutation: Jev-classified benign tolerates a low score (ok=true)", async () => {
+  const dir = mutProject();
+  try {
+    const res = await runMutationGate(dir, ["src/domain/foo.ts"], {
+      minScore: 0.8, maxFiles: 3, maxMutants: 60,
+      classify: async () => ({ genuine: 0, note: "classified 5 survivor(s)" }),
+      run: () => ({ code: 0, stdout: "", stderr: "", signal: null }), // all survive -> low score
+    });
+    assert.equal(res.ok, true, "classified-equivalent survivors should not fail on low score");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mutation: without Jev (unclassified) a low score still fails (ok=false)", async () => {
+  const dir = mutProject();
+  try {
+    const res = await runMutationGate(dir, ["src/domain/foo.ts"], {
+      minScore: 0.8, maxFiles: 3, maxMutants: 60,
+      classify: async () => ({ genuine: 0, note: "unclassified (no Jev)" }),
+      run: () => ({ code: 0, stdout: "", stderr: "", signal: null }),
+    });
+    assert.equal(res.ok, false, "no-Jev fallback should gate on min_score");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mutation: a Jev-classified genuine gap always holds (ok=false)", async () => {
+  const dir = mutProject();
+  try {
+    const res = await runMutationGate(dir, ["src/domain/foo.ts"], {
+      minScore: 0.8, maxFiles: 3, maxMutants: 60,
+      classify: async () => ({ genuine: 1, note: "classified 5 survivor(s)" }),
+      run: () => ({ code: 0, stdout: "", stderr: "", signal: null }),
+    });
+    assert.equal(res.ok, false, "genuine gap must hold");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
