@@ -24,6 +24,8 @@ interface GhIssueJson {
   body: string;
   createdAt: string;
   labels: Array<{ name: string }>;
+  /** true when the number is a pull request, not an issue (PRs and issues share numbering). */
+  pull_request?: boolean;
 }
 
 interface GhCommentJson {
@@ -69,6 +71,7 @@ export function issueToTask(issue: GhIssueJson, repo: string, comments: TaskComm
   return {
     id: issue.number,
     file: `gh://${repo}#${issue.number}`,
+    kind: issue.pull_request ? "pr" : "issue",
     title: issue.title,
     status,
     assignee,
@@ -106,8 +109,16 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
 
   const gh = (args: string[], timeout?: number) => exec("gh", args, typeof timeout === "number" ? { timeout } : {});
 
+  // gh `issue view --json` has no `pull_request` field (verified), yet the REST
+  // /issues/{n} endpoint returns PRs too — so PR-ness is only detectable via
+  // `gh api ... --jq`. This single call both fetches and disambiguates.
   const fetchIssue = (id: number): GhIssueJson | null => {
-    const res = gh(["issue", "view", String(id), ...repoFlag(), "--json", "number,title,state,body,createdAt,labels"]);
+    const res = gh([
+      "api",
+      `repos/${repoFull}/issues/${id}`,
+      "--jq",
+      "{number,title,state,body,createdAt:.created_at,pull_request:(.pull_request != null),labels:((.labels//[])|map(.name))}",
+    ]);
     if (res.code !== 0) return null;
     try {
       return JSON.parse(res.stdout) as GhIssueJson;
@@ -143,9 +154,13 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
     return issueToTask(created, repoFull);
   };
 
+  // A PR number shares the issue namespace but is NOT a task issue — closing,
+  // editing or labeling it acts on the (wrong) pull request (the #14 incident).
+  const refusePr = (issue: GhIssueJson | null): issue is null => !issue || Boolean(issue.pull_request);
+
   const update: TaskStore["update"] = (id, patch, newBody) => {
     const issue = fetchIssue(id);
-    if (!issue) return null;
+    if (refusePr(issue)) return null;
     const current = issueToTask(issue, repoFull, fetchComments(id));
     const next: Task = {
       ...current,
@@ -180,18 +195,21 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
   };
 
   const addComment: TaskStore["addComment"] = (id, author, body) => {
-    // Readable **[agent]** prefix for humans + invisible machine marker for
-    // hasHumanReply (task #32) — the marker is the only agent signal and is
-    // reserved for harness-agent authors (gh posts are all agent-authored here).
-    const marked = isAgentAuthor(author) ? withAgentMarker(`**[${author}]** ${body}`) : `**[${author}]** ${body}`;
-    const post = gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=${marked}`], 60000);
+      const issue = fetchIssue(id);
+      if (refusePr(issue)) return null;
+      // Readable **[agent]** prefix for humans + invisible machine marker for
+      // hasHumanReply (task #32) — the marker is the only agent signal and is
+      // reserved for harness-agent authors (gh posts are all agent-authored here).
+      const marked = isAgentAuthor(author) ? withAgentMarker(`**[${author}]** ${body}`) : `**[${author}]** ${body}`;
+      const post = gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=${marked}`], 60000);
+
     if (post.code !== 0) return null;
     return get(id);
   };
 
   const close: TaskStore["close"] = (id, note = "") => {
     const issue = fetchIssue(id);
-    if (!issue) return null;
+    if (refusePr(issue)) return null;
     if (note) {
       gh(["api", `repos/${repoFull}/issues/${id}/comments`, "--method", "POST", "-f", `body=${withAgentMarker(`**[empress]** ${note}`)}`], 60000);
     }
@@ -200,6 +218,8 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
   };
 
   const remove: TaskStore["remove"] = (id) => {
+    const issue = fetchIssue(id);
+    if (refusePr(issue)) return false; // never delete a PR as if it were a task
     const res = gh(["issue", "delete", String(id), "--yes", ...repoFlag()], 60000);
     return res.code === 0;
   };

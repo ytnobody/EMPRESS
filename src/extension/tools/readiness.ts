@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { addComment, CLARIFY_FRAME, getTask, issueLang, proposeSpec, updateTask } from "../../domain/tasks.ts";
+import { addComment, CLARIFY_FRAME, detectLanguage, getTask, issueLang, proposeSpec, taskRef, updateTask } from "../../domain/tasks.ts";
+
 import { checkReadiness } from "../../domain/readiness.ts";
 
 import { cfg, projectDir, reply } from "./helpers.ts";
@@ -16,6 +17,11 @@ export function register(pi: ExtensionAPI) {
       const config = cfg();
       const t = getTask(cwd, params.id);
       if (!t) return reply(`task #${params.id} not found`);
+      // A number that resolves to a pull request is not a task issue — never
+      // drive clarification / labeling / closing on it (the #14 wrong-close).
+      if (t.kind === "pr") {
+        return reply(JSON.stringify({ ready: false, reasons: [`${taskRef(t)} is a pull request, not an issue task — refusing to treat it as a task`], jev: null }));
+      }
       const verdict = await checkReadiness(cwd, config, t);
       if (verdict.needs_clarification) {
         // Proposal-based clarification: post a concrete draft spec + open questions

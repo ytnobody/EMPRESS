@@ -8,7 +8,7 @@ import { initProject, type InitOpts } from "./init.ts";
 import { runLoop } from "./run.ts";
 import { doctor } from "./doctor.ts";
 import { readLoopState, patchLoopState } from "./state.ts";
-import { createTask, listTasks, removeTask } from "../domain/tasks.ts";
+import { createTask, listTasks, removeTask, taskRef, findTitleDuplicate } from "../domain/tasks.ts";
 import { syncLocalToGh } from "../domain/taskstore.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,7 +56,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
         const t = listTasks(cwd, { includeAll: true });
         for (const task of t) {
           const flag = task.needs_clarification ? " [needs-clarification]" : "";
-          console.log(`#${task.id} [${task.status}]${flag} ${task.title}`);
+          console.log(`${taskRef(task)} [${task.status}]${flag} ${task.title}`);
         }
         break;
       }
@@ -71,6 +71,13 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
         console.log(ok ? `empress: removed task #${o.remove}` : `empress: task #${o.remove} not found`);
         break;
       }
+      // Auto-file dedupe (audit passes): a near-identical non-done title means
+      // the finding was already filed — skip instead of duplicating it.
+      const dup = findTitleDuplicate(listTasks(cwd, { includeAll: true }), title);
+      if (dup) {
+        console.log(`empress: skipped — ${taskRef(dup)} "${dup.title}" already covers near-identical title "${title}"`);
+        break;
+      }
       const task = createTask(cwd, {
         title,
         purpose: typeof o.purpose === "string" ? o.purpose : undefined,
@@ -78,7 +85,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
         acceptance: typeof o.acceptance === "string" ? [o.acceptance] : [],
         nongoals: typeof o.nongoal === "string" ? [o.nongoal] : [],
       });
-      console.log(`empress: created task #${task.id} -> ${task.file}`);
+      console.log(`empress: created ${taskRef(task)} -> ${task.file}`);
       break;
     }
     case "list": {
@@ -88,7 +95,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
         break;
       }
       for (const task of t) {
-        console.log(`#${task.id} [${task.status}] ${task.title}${task.assignee ? ` (${task.assignee})` : ""}`);
+        console.log(`${taskRef(task)} [${task.status}] ${task.title}${task.assignee ? ` (${task.assignee})` : ""}`);
       }
       break;
     }

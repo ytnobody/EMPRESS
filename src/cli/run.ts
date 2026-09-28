@@ -37,7 +37,7 @@ const AUDIT_MSG =
   "secrets, dangerous patterns, tracked secret-ish files), and LIGHTER/FASTER (large " +
   "files, dead weight) — `empress_audit_scan` gives deterministic findings per axis. " +
   "File REAL findings as tasks via bash `bun bin/empress.ts task \"<title>\" --acceptance \"...\"` " +
-  "(dedupe by simple title match; prefer auto-landable LOW/MEDIUM tasks, separate control-plane HIGH ones) " +
+  "(the CLI auto-dedupes: a near-identical non-done title is reported as \"skipped — duplicate\"; prefer auto-landable LOW/MEDIUM tasks, separate control-plane HIGH ones) " +
   "and report what you did. Do NOT spawn Engineers or land anything during an audit pass.";
 
 const CLARIFY_MSG =
@@ -96,8 +96,9 @@ function runPass({ cwd, config, model, thinking, audit = false, mode = "run", cl
   args.push("--append-system-prompt", agentPrompt);
   if (mode === "audit") args.push(`${AUDIT_MSG}\n\n${langInstruction(config)}`);
   else if (mode === "clarify") {
+    const tag = config.github?.enabled ? "issue" : "task"; // label the shared GitHub numbering space
     const langHint = Object.entries(clarifyLang).length
-      ? `Issue languages (detected) to match in ALL your comments/questions: ${Object.entries(clarifyLang).map(([id, l]) => `#${id}=${l}`).join(", ")}.`
+      ? `Issue languages (detected) to match in ALL your comments/questions: ${Object.entries(clarifyLang).map(([id, l]) => `${tag} #${id}=${l}`).join(", ")}.`
       : "Respond in the language of each issue's title/body (detected: ja for Japanese, zh, ko, else en).";
     args.push(`${CLARIFY_MSG}\n\nTasks to clarify (ids): ${clarificationIds.join(", ") || "<none>"}\n${langInstruction(config)}${langHint ? `\n${langHint}` : ""}`);
   } else if (mode === "fix") args.push(`${FIX_MSG}\n\nTasks to FIX (ids): ${clarificationIds.join(", ") || "<none>"}`);
@@ -386,9 +387,10 @@ export async function runLoop(
         }
         if (readyIds.length > 0) {
 
+
           pass++;
           const started = new Date().toISOString();
-          console.log(`\n--- pass ${pass} (${started}) ready: #${readyIds.join(", #")} ---`);
+          console.log(`\n--- pass ${pass} (${started}) ready: ${readyIds.map((id) => `${config.github?.enabled ? "issue" : "task"} #${id}`).join(", ")} ---`);
           const res = await runPass({ cwd, config, model: superModel, thinking });
           await handleResult(cwd, res, started, pass, config);
           // LLM-free backlog continuation: if ready tasks remain un-started (still

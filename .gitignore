@@ -1,4 +1,9 @@
+======
+# node_modules/ only matches directories; the machine-specific root node_modules
+# symlink is a FILE so it needs a bare pattern too (see cebdb6e)
 node_modules
+node_modules/
+
 .pi/npm/
 *.log
 

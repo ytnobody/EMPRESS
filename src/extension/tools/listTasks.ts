@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { listTasks } from "../../domain/tasks.ts";
+import { listTasks, taskRef } from "../../domain/tasks.ts";
 import { projectDir, reply } from "./helpers.ts";
 
 export function register(pi: ExtensionAPI) {
@@ -15,7 +15,9 @@ export function register(pi: ExtensionAPI) {
       const cwd = projectDir();
       const tasks = listTasks(cwd, { includeAll: Boolean(params?.include_all) });
       return reply(JSON.stringify(tasks.map((t) => ({
-        Number: t.id, Title: t.title, Status: t.status, assignee: t.assignee,
+        // Ref labels the shared GitHub numbering namespace (issue #N / PR #N) —
+        // never a bare #N that could be a PR. Number stays for programmatic use.
+        Number: t.id, Ref: taskRef(t), Title: t.title, Status: t.status, assignee: t.assignee,
         labels: t.labels, needs_clarification: t.needs_clarification, branch: t.branch, body: t.body,
       }))));
     },

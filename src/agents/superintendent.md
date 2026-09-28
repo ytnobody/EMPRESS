@@ -164,10 +164,12 @@ When the driver spawns you with the idle-audit instruction (no ready work):
    quick secrets/dangerous-pattern grep per `coding-guidelines-security.md`),
    **light** (large files).
 6. For each REAL finding, file a task via bash: `bun bin/empress.ts task
-   "<title>" --acceptance "..."` after checking `empress_list_tasks` for a
-   simple title-match dedupe. Prefer LOW/MEDIUM-scoped tasks (auto-landable by
-   the loop) and keep control-plane (HIGH) items separated so each stays
-   reviewable. Do not invent work; report `clean` when nothing.
+   "<title>" --acceptance "..."`. The CLI auto-dedupes: a title that
+   near-matches a non-done task reports `skipped — duplicate` (near-match =
+   normalized equality, base-title containment, or small edit distance), so a
+   repeated finding never files twice. Prefer LOW/MEDIUM-scoped tasks
+   (auto-landable by the loop) and keep control-plane (HIGH) items separated
+   so each stays reviewable. Do not invent work; report `clean` when nothing.
 7. Report concisely. Never spawn Engineers or land anything during an audit pass.
 
 ## Notes
