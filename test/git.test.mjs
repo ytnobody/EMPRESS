@@ -377,3 +377,51 @@ test("pruneStaleMergedBranches: prunes a fake squash-merged (PR-merged, non-ance
   }
 });
 
+// #70: a PR-MERGED branch whose tip is NOT a merge-base ancestor, checked out in
+// an EMPRESS-MANAGED worktree, is dead weight — but the DEFAULT sweep protects
+// managed worktrees on purpose, so it must be KEPT by an unscoped run. Only a
+// caller-confirmed `scope` opts into pruning it (branch deleted + worktree
+// removed), still gated on the confirmed PR-MERGED signal. Verifies both sides
+// of the boundary on one fixture: default keeps, scope prunes.
+test("pruneStaleMergedBranches: PR-merged managed-worktree branch KEPT unscoped, pruned+worktree-removed when scoped", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-git-donebranch-"));
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe", encoding: "utf-8" });
+  try {
+    g(["init", "-q", "-b", "develop"]);
+    g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+    fs.writeFileSync(path.join(dir, "f.txt"), "base\n");
+    g(["add", "-A"]); g(["commit", "-qm", "A"]);
+    // DONE-task branch: content changed, tip NOT an ancestor of base (squash PR)
+    g(["checkout", "-q", "-b", "empress/task-70b"]);
+    fs.writeFileSync(path.join(dir, "f.txt"), "feature\n");
+    g(["add", "-A"]); g(["commit", "-qm", "F"]);
+    g(["checkout", "-q", "develop"]); // develop stays at A => non-ancestor tip
+    assert.throws(() => { execFileSync("git", ["-C", dir, "merge-base", "--is-ancestor", "empress/task-70b", "develop"], { stdio: "pipe" }); });
+    // checked out in an EMPRESS-managed worktree (like the harness creates)
+    const wt = path.join(dir, ".empress", "worktrees", "70");
+    fs.mkdirSync(path.dirname(wt), { recursive: true });
+    g(["worktree", "add", "-q", wt, "empress/task-70b"]);
+    // PR signal: confirmed MERGED only for the DONE leftover
+    const probe = (b) => b === "empress/task-70b";
+
+    // (1) unscoped DEFAULT sweep => KEPT, managed worktree intact
+    const kept = pruneStaleMergedBranches(dir, "develop", { isPrMerged: probe });
+    assert.ok(!kept.pruned.includes("empress/task-70b"), `PR-merged managed-worktree branch must be KEPT by default sweep, got ${kept.pruned}`);
+    assert.ok(kept.skipped.includes("empress/task-70b"), "PR-merged managed-worktree branch reported skipped/protected");
+    assert.ok(fs.existsSync(path.join(wt, ".git")), "managed worktree INTACT after default sweep");
+
+    // (2) caller-confirmed scope => pruned + worktree removed (still PR-gated)
+    const scoped = pruneStaleMergedBranches(dir, "develop", { scope: ["empress/task-70b"], isPrMerged: probe });
+    assert.ok(scoped.pruned.includes("empress/task-70b"), `scoped PR-merged leftover pruned, got ${scoped.pruned}`);
+    assert.ok(!fs.existsSync(wt), "managed worktree removed by scoped prune");
+    const names = execFileSync("git", ["-C", dir, "branch", "--format=%(refname:short)"], { encoding: "utf-8" }).split("\n").filter(Boolean);
+    assert.ok(!names.includes("empress/task-70b"), "PR-merged DONE branch deleted");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
