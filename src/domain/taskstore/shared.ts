@@ -2,7 +2,40 @@
 // language detection, proposal drafting, human-reply detection, task brief).
 // Purely functional: no fs, shell, or gh-execution here — the local and gh
 // backends live in local.ts / gh.ts and consume these.
+import { randomUUID } from "node:crypto";
 import type { run } from "../../shared/shell.ts";
+
+/**
+ * Invisible machine marker embedded in every harness-posted comment, so agent
+ * vs human comments stay distinguishable even when all comments are authored
+ * by the same account (gh mode). Rendered as an HTML comment: hidden on
+ * GitHub, visible only in the raw body.
+ */
+export const AGENT_MARKER_PREFIX = "<!--empress:agent=";
+
+/** Unique-per-post agent marker (UUID v4 nonce — not reproducible by accident). */
+export function agentMarker(): string {
+  return `${AGENT_MARKER_PREFIX}${randomUUID()}-->`;
+}
+
+/** Append the agent marker line to a comment body. */
+export function withAgentMarker(body: string): string {
+  return `${body}\n${agentMarker()}`;
+}
+
+const AGENT_MARKER_RE = /<!--empress:agent=/;
+
+/** Harness agent authors whose comments carry the machine marker. The marker
+ * is reserved for harness-posted comments; a HUMAN author (posted through the
+ * local store) must NOT receive it, else a human reply would be misread as an
+ * agent comment (task #32). Humans are distinguished by the readable
+ * `**[agent]**` prefix, never the marker. */
+export const AGENT_AUTHORS = new Set(["empress", "superintendent", "engineer"]);
+
+/** True when the comment author is a harness agent (marker-eligible). */
+export function isAgentAuthor(author: string): boolean {
+  return AGENT_AUTHORS.has(author);
+}
 
 export const TASK_STATUSES: string[] = ["open", "assigned", "in-progress", "done", "blocked"];
 
@@ -100,17 +133,24 @@ export function buildMarkdown(input: TaskInput): string {
   ].join("\n");
 }
 
+// ponytail: detection is marker-presence — the UUID nonce is not verified
+// against a registry and comments predating this change are treated as human.
+// Upgrade path: track posted agent comment ids (repo body metadata) if
+// deliberate marker forgery or rollover over pre-marker threads ever matters.
+
 /**
  * True when the task's LATEST comment is a human reply rather than an agent
- * comment. Comments posted by the harness carry a `**[agent]**` marker prefix
- * (e.g. `**[empress]**`, `**[superintendent]**`, `**[engineer]**`); on GitHub all
- * comments are authored by the CLI token account, so this prefix convention is
- * how we tell agent comments apart from a genuine human reply.
+ * comment. On GitHub every comment is authored by the CLI token account, so
+ * authorship cannot tell agent from human — instead every harness-posted
+ * comment embeds the invisible `<!--empress:agent=<uuid>-->` marker and the
+ * readable `**[agent]**` prefix is kept only for human readers. Agent is
+ * decided by marker presence alone: a human echoing the `**[agent]**` prefix
+ * (no marker) is still a human reply (task #32).
  */
 export function hasHumanReply(t: Task): boolean {
   if (!t.comments || t.comments.length === 0) return false;
   const last = t.comments[t.comments.length - 1];
-  return !/^\*\*\[[^\]]+\]\*\*/.test(String(last.body || "").trim());
+  return !AGENT_MARKER_RE.test(String(last.body || ""));
 }
 
 /**

@@ -43,7 +43,7 @@ const AUDIT_MSG =
 const CLARIFY_MSG =
   "You are the EMPRESS Superintendent running a CLARIFICATION pass. The following tasks are marked needs_clarification and have a pending human reply in their comments. " +
   "Drive the Q&A **entirely via the issue's comments** — do NOT rewrite the body directly yet. " +
-  "For each: `empress_get_task` to read the full comment thread (the human's answers are the plain-text replies without a [agent] marker prefix, per hasHumanReply). " +
+  "For each: `empress_get_task` to read the full comment thread (comments carrying the hidden `<!--empress:agent=<uuid>-->` marker are the agent's; plain-text replies without it are the human's answers, per hasHumanReply). " +
   "Incorporate the answers into a refined understanding, then either (a) post a follow-up question as a comment if something is still ambiguous, or (b) if the open questions are resolved, " +
   "**rewrite the issue body once with the resolved Purpose/Scope/Acceptance/Non-Goals via `empress_apply_clarification`** (which clears needs_clarification). " +
   "Do not spawn Engineers or land anything in this pass. End with a short report of what you asked / clarified.";

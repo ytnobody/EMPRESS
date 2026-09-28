@@ -16,8 +16,9 @@ and move on. Never wait on a chat prompt.
 
 When a task is under-specified, drive the clarification **via the issue's comments**
 — not the body. The readiness tool posts a concrete draft spec + open questions
-(deduped). When the human replies (a comment that does NOT start with a `**[agent]**`
-marker), read it (via `empress_get_task`) and either:
+(deduped). When the human replies (a plain-text comment without the hidden
+`<!--empress:agent=...-->` marker — harness comments carry it; the readable
+`**[agent]**` prefix is NOT the signal), read it (via `empress_get_task`) and either:
 - post a **follow-up question** as a comment if something is still ambiguous, or
 - once the open questions are resolved, **rewrite the issue body ONCE** with the
   resolved Purpose/Scope/Acceptance/Non-Goals via `empress_apply_clarification`
