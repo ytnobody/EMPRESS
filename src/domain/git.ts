@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { EMPRESS_DIR } from "../shared/config.ts";
 import { git, run } from "../shared/shell.ts";
+import { ghAvailable } from "./github.ts";
 
 export function isGitRepo(cwd: string): boolean {
   return run("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"]).code === 0;
@@ -143,6 +144,36 @@ export interface BranchPruneResult {
 }
 
 /**
+ * Pure decision for pruning a local branch in pruneStaleMergedBranches: a
+ * branch is prunable iff EITHER it is a merge-base ancestor of `base` (fully
+ * merged via fast-forward / merge commit) OR its GitHub PR is confirmed MERGED
+ * (squash / merge-commit PRs collapse the branch's commits onto base, so the
+ * tip is NOT an ancestor even though the content landed). Both signals are
+ * gathered by the executor; this decides independently of git/gh state.
+ */
+export function decideLocalPrune(isAncestor: boolean, prMerged: boolean): boolean {
+  return isAncestor || prMerged;
+}
+
+/**
+ * Best-effort: is the branch's GitHub PR in state MERGED? Runs `gh pr view
+ * --head <branch> --json state`. Fail-safe — returns false on any failure or
+ * when gh is absent, so a branch is only ever PR-pruned when gh authoritatively
+ * reports MERGED. Never throws. This is the signal that catches squash /
+ * merge-commit PRs whose tips are not merge-base ancestors of the base branch.
+ */
+export function tryMergePRMerged(cwd: string, branch: string): boolean {
+  if (!ghAvailable()) return false;
+  const res = run("gh", ["pr", "view", "--head", branch, "--json", "state"], { cwd });
+  if (res.code !== 0) return false;
+  try {
+    return JSON.parse(res.stdout)?.state === "MERGED";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * LLM-free merge-conflict check (git >= 2.38): `git merge-tree --write-tree`
  * exits non-zero iff merging `branch` into `base` conflicts. Used by the driver
  * to detect a held task branch that is stuck conflicting with the base — the
@@ -196,6 +227,15 @@ function isManagedWorktree(cwd: string, wtPath: string): boolean {
  * Deterministic and merge-safe — this is what lets the harness auto-prune dead
  * branches (+ their worktrees) instead of filing a housekeeping task for them.
  *
+ * #68: a branch is ALSO prunable when its GitHub PR is confirmed MERGED
+ * (squash / merge-commit PRs land the content on base but leave a non-ancestor
+ * tip that `merge-base --is-ancestor` alone would miss). `opts.isPrMerged`
+ * supplies the PR-merged signal; it defaults to `tryMergePRMerged` (fail-safe
+ * `gh pr view --head <branch>`), and may be injected for deterministic tests.
+ * An ancestor-merged branch uses safe `git branch -d`; a PR-merged branch with
+ * a non-ancestor tip is force-deleted (`git branch -D`) because `-d` refuses
+ * non-ancestor tips — safe only because gh confirmed the PR's content landed.
+ *
  * DEFAULT-SWEEP SAFETY: a branch checked out in an EMPRESS-managed worktree
  * (under `<cwd>/${EMPRESS_DIR}/worktrees/`) is always protected in a default
  * sweep, because that branch may be an ACTIVE in-progress engineer task whose
@@ -205,7 +245,7 @@ function isManagedWorktree(cwd: string, wtPath: string): boolean {
  * leftover can list it in `opts.scope` to opt into pruning it (worktree removal
  * still applies), which is the #64 targeted-execution path.
  */
-export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep?: string[]; scope?: string[] } = {}): BranchPruneResult {
+export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep?: string[]; scope?: string[]; isPrMerged?: (branch: string, cwd: string) => boolean } = {}): BranchPruneResult {
   const keep = new Set<string>([...(opts.keep || []), "main", "develop", base]);
   const current = currentBranch(cwd);
   if (current) keep.add(current);
@@ -213,6 +253,7 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
   const candidates = explicitScope
     ? explicitScope.filter((b) => !keep.has(b))
     : listBranches(cwd).filter((b) => !keep.has(b));
+  const isPrMerged = opts.isPrMerged || ((b, d) => tryMergePRMerged(d, b));
   const pruned: string[] = [];
   const skipped: string[] = [];
   for (const b of candidates) {
@@ -226,9 +267,12 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
         continue;
       }
     }
-    // pruned iff the branch is already an ancestor of base (fully merged in).
-    const mergedIn = run("git", ["-C", cwd, "merge-base", "--is-ancestor", b, base]).code === 0;
-    if (!mergedIn) {
+    // pruned iff the branch is an ancestor of base (fully merged in) OR its PR
+    // is confirmed MERGED (#68 squash / merge-commit PRs). Probe gh only when
+    // the ancestry check misses, to avoid a gh round-trip per merged branch.
+    const isAncestor = run("git", ["-C", cwd, "merge-base", "--is-ancestor", b, base]).code === 0;
+    const prMerged = !isAncestor ? isPrMerged(b, cwd) : false;
+    if (!decideLocalPrune(isAncestor, prMerged)) {
       skipped.push(b);
       continue;
     }
@@ -240,7 +284,10 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
       if (path.resolve(wt) === path.resolve(cwd)) continue;
       run("git", ["-C", cwd, "worktree", "remove", "--force", wt]);
     }
-    const res = run("git", ["-C", cwd, "branch", "-d", b]);
+    // ancestor-merged => safe `git branch -d`; PR-merged non-ancestor tip => `-d`
+    // would refuse ("not fully merged"), so force `-D` — safe only because gh
+    // confirmed the PR's content landed on base.
+    const res = run("git", ["-C", cwd, "branch", isAncestor ? "-d" : "-D", b]);
     if (res.code === 0) pruned.push(b);
     else skipped.push(b); // non-fast-forward head / could not be safely deleted
   }
