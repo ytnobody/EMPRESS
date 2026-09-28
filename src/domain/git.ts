@@ -156,15 +156,17 @@ export function decideLocalPrune(isAncestor: boolean, prMerged: boolean): boolea
 }
 
 /**
- * Best-effort: is the branch's GitHub PR in state MERGED? Runs `gh pr view
- * --head <branch> --json state`. Fail-safe — returns false on any failure or
- * when gh is absent, so a branch is only ever PR-pruned when gh authoritatively
- * reports MERGED. Never throws. This is the signal that catches squash /
- * merge-commit PRs whose tips are not merge-base ancestors of the base branch.
+ * Best-effort: is the branch's GitHub PR in state MERGED? Runs the positional
+ * form `gh pr view <branch> --json state`. Fail-safe — returns false on any
+ * failure or when gh is absent, so a branch is only ever PR-pruned when gh
+ * authoritatively reports MERGED. Never throws. This is the signal that catches
+ * squash / merge-commit PRs whose tips are not merge-base ancestors of the base
+ * branch. (The `--head <branch>` form is rejected by gh >= 2.74.0 with "unknown
+ * flag", so the positional form is used.)
  */
 export function tryMergePRMerged(cwd: string, branch: string): boolean {
   if (!ghAvailable()) return false;
-  const res = run("gh", ["pr", "view", "--head", branch, "--json", "state"], { cwd });
+  const res = run("gh", ["pr", "view", branch, "--json", "state"], { cwd });
   if (res.code !== 0) return false;
   try {
     return JSON.parse(res.stdout)?.state === "MERGED";
@@ -231,7 +233,7 @@ function isManagedWorktree(cwd: string, wtPath: string): boolean {
  * (squash / merge-commit PRs land the content on base but leave a non-ancestor
  * tip that `merge-base --is-ancestor` alone would miss). `opts.isPrMerged`
  * supplies the PR-merged signal; it defaults to `tryMergePRMerged` (fail-safe
- * `gh pr view --head <branch>`), and may be injected for deterministic tests.
+ * `gh pr view <branch>`), and may be injected for deterministic tests.
  * An ancestor-merged branch uses safe `git branch -d`; a PR-merged branch with
  * a non-ancestor tip is force-deleted (`git branch -D`) because `-d` refuses
  * non-ancestor tips — safe only because gh confirmed the PR's content landed.

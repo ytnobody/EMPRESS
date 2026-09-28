@@ -319,8 +319,58 @@ test("decideLocalPrune: non-merged + non-PR branch is kept", () => {
 // Verifies: tryMergePRMerged is fail-safe — when gh is unavailable or errors it
 // returns false (never prunes), and only an explicit ,MERGED` state is true.
 // (Pure parse of a fake gh state payload, no real gh/bin call.)
-test("tryMergePRMerged: parses only an explicit MERGED state into true", () => {
+ test("tryMergePRMerged: parses only an explicit MERGED state into true", () => {
   assert.equal(tryMergePRMerged("/nonexistent", "x"), false);
+});
+
+// #72 — gh 2.74.0 rejects `gh pr view --head <branch>` with "unknown flag", so
+// tryMergePRMerged fail-safed to false and PR-MERGED branch pruning never ran
+// (task-30/31/34/36/37 + worktrees stayed as dead weight). Regression: the probe
+// must use the POSITIONAL form `gh pr view <branch> --json state`. This exercises
+// the REAL probe path with a fake `gh` executable shim on PATH (records argv,
+// emits a state payload) — not a mock of `tryMergePRMerged` or the shell helper.
+test("tryMergePRMerged: positional gh pr view, real probe path via a fake gh shim on PATH", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-ghshim-"));
+  const bindir = path.join(dir, "bin");
+  fs.mkdirSync(bindir);
+  const recordFile = path.join(dir, "argv.txt");
+  // Shim: resolves `--version` (so ghAvailable() passes), records argv for any
+  // `pr view` call, and echoes the state configured by FAKE_GH_STATE.
+  fs.writeFileSync(
+    path.join(bindir, "gh"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = "--version" ]; then echo \"gh version 2.74.0\"; exit 0; fi\n` +
+      `if [ "$1" = "pr" ]; then echo "PR_VIEW $*" >> "$FAKE_GH_RECORD"; echo "$FAKE_GH_STATE"; exit 0; fi\n` +
+      `exit 1\n`
+  );
+  fs.chmodSync(path.join(bindir, "gh"), 0o755);
+  const env = { ...process.env, PATH: `${bindir}${path.delimiter}${process.env.PATH}`, FAKE_GH_RECORD: recordFile, FAKE_GH_STATE: '{"state":"MERGED"}' };
+  try {
+    // Real cwd so the probe runs with a real working dir (no git needed here).
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "empress-ghshim-cwd-"));
+    const probe = (b) => tryMergePRMerged(cwd, b);
+    // Restore env for the duration so the shim on PATH is actually consulted.
+    const savedPath = process.env.PATH; const savedRec = process.env.FAKE_GH_RECORD; const savedState = process.env.FAKE_GH_STATE;
+    process.env.PATH = env.PATH; process.env.FAKE_GH_RECORD = recordFile; process.env.FAKE_GH_STATE = env.FAKE_GH_STATE;
+    try {
+      // MERGED => true, positional, no --head.
+      assert.equal(probe("empress/task-30"), true, "MERGED state returns true");
+      const mergedArgs = fs.readFileSync(recordFile, "utf-8").trim().split(/\n+/).map((l) => l.slice("PR_VIEW ".length).split(/\s+/));
+      const last = mergedArgs[0]; // pr view <branch> --json state
+      assert.deepEqual(last, ["pr", "view", "empress/task-30", "--json", "state"], `positional form recorded, got ${JSON.stringify(last)}`);
+      assert.ok(!last.includes("--head"), "no --head flag anywhere");
+
+      // CLOSED => false (fail-safe kept; superseded CLOSED-PR branches stay put).
+      process.env.FAKE_GH_STATE = '{"state":"CLOSED"}';
+      assert.equal(probe("empress/task-52"), false, "CLOSED state returns false");
+      const closedArgs = fs.readFileSync(recordFile, "utf-8").trim().split(/\n+/).map((l) => l.slice("PR_VIEW ".length).split(/\s+/));
+      assert.deepEqual(closedArgs[1], ["pr", "view", "empress/task-52", "--json", "state"], "positional form preserved for CLOSED probe");
+    } finally {
+      process.env.PATH = savedPath; process.env.FAKE_GH_RECORD = savedRec; process.env.FAKE_GH_STATE = savedState;
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // Verifies (extended helper end-to-end on a fixture): a fake squash-merged
