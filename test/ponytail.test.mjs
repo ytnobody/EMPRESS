@@ -231,6 +231,40 @@ test("ponytail: non-upgrade following note stays separate and no-upgrade markers
   }
 });
 
+// Verifies (issue #78): collectPonytailDebt's raw row render does NOT embed the
+// full joined body and then re-append the split fields, so a continuation-upgrade
+// marker (upgrade on a wrapped comment line) yields ONE copy of the upgrade/ceiling
+// text with a single 'upgrade:' prefix — never 'upgrade: upgrade:' or duplicated
+// paragraphs — while still naming file:line, ceiling, and upgrade as labeled fields.
+test("ponytail: raw row names ceiling/upgrade once, no duplicated upgrade: prefix", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ponytail-"));
+  try {
+    fs.writeFileSync(
+      path.join(tmp, "r.js"),
+      [
+        "// ponytail: spins CPU with zero output, caught only by pass_timeout.",
+        "// upgrade: add per-pid sampling if pass-spinning ever matters.",
+        "x = 1",
+      ].join("\n"),
+    );
+    const out = collectPonytailDebt(tmp);
+    const row = out.rows[0];
+    // spec: raw = "file:line, ceiling: <once>. upgrade: <once>" — no body re-embed.
+    assert.equal(out.markers, 1);
+    assert.equal(out.noTrigger, 0); // trigger + explicit upgrade present
+    assert.ok(!row.raw.includes("upgrade: upgrade:"), "no duplicated upgrade: prefix");
+    assert.equal((row.raw.match(/upgrade:/g) || []).length, 1, "single 'upgrade:' label");
+    // the joined paragraph text appears exactly once in raw, never duplicated
+    assert.equal((row.raw.match(/pass_timeout\./g) || []).length, 1);
+    assert.equal((row.raw.match(/add per-pid sampling/g) || []).length, 1);
+    // separate labeled fields preserved: file:line + ceiling + upgrade + [no-trigger]
+    assert.ok(row.raw.startsWith(`${row.file}:${row.line}, ceiling:`));
+    assert.ok(row.raw.includes(". upgrade:"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // Verifies: node_modules is skipped, so a marker buried there is NOT counted.
 test("ponytail: skips node_modules", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ponytail-"));

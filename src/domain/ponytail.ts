@@ -89,13 +89,22 @@ function walk(dir: string, out: PonytailRow[], relBase: string): void {
             }
           }
           const noTrigger = !TRIGGER_RE.test(body) || !upgrade;
+          // raw render: do NOT embed the full joined body AND re-append the split
+          // fields (issue #78) — that duplicated the ceiling/upgrade text for
+          // continuation-upgrade markers. Render each labeled field exactly once:
+          // "file:line, ceiling: X. upgrade: Y". The keyword-split upgrade field
+          // already carries its own "upgrade:"/"upgrade path:" prefix (joined from a
+          // continuation line), so strip it here to yield a single "upgrade:" label
+          // prefix — never "upgrade: upgrade:".
+          const upgradeText =
+            upgrade && upgrade !== "(none)" ? upgrade.replace(UPGRADE_PREFIX, "").trim() : upgrade;
           out.push({
             file: rel,
             line: markerLine + 1,
             ceiling: ceiling || "(unspecified)",
             upgrade: upgrade || "(none)",
             noTrigger,
-            raw: `${rel}:${markerLine + 1}, ${body || "ponytail marker"}. ceiling: ${ceiling || "?"}${upgrade ? `. upgrade: ${upgrade}` : ""}${noTrigger ? "  [no-trigger]" : ""}`,
+            raw: `${rel}:${markerLine + 1}, ceiling: ${ceiling || "?"}${upgrade ? `. upgrade: ${upgradeText}` : ""}${noTrigger ? "  [no-trigger]" : ""}`,
           });
         }
       } catch {
