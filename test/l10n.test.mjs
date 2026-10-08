@@ -14,6 +14,7 @@ test("l10n: agentL10n ships a full table for every supported language", () => {
     assert.equal(typeof t.highRiskSkip("r"), "string");
     assert.equal(typeof t.prOpened("u"), "string");
     assert.equal(typeof t.prFailed("e"), "string");
+    assert.equal(typeof t.originPushFailed("develop", "e"), "string");
     assert.equal(typeof t.landedNote("develop", "x"), "string");
     assert.equal(typeof t.clarifyApplied(), "string");
     assert.equal(typeof t.lessonAfterLand(1, "LOW", "r"), "string");
@@ -28,6 +29,15 @@ test("l10n: landing lesson is written in the resolved language, not English", ()
   assert.ok(AGENT_L10N.ko.lessonAfterLand(34, "HIGH", "r").includes("랜딩"));
   assert.ok(!/After landing/.test(AGENT_L10N.zh.lessonAfterLand(34, "HIGH", "r")));
   assert.ok(agentL10n("xx").lessonAfterLand(1, "LOW", "").includes("After landing"));
+});
+
+test("l10n: origin-reconcile failure comment localizes per language", () => {
+  // Verifies: the #94 land comment for a failed origin push reads in the issue's
+  // language (ja/zh/ko) and keeps the factual base branch token.
+  assert.ok(AGENT_L10N.ja.originPushFailed("develop", "e").includes("origin"));
+  assert.ok(AGENT_L10N.zh.originPushFailed("develop", "e").includes("origin"));
+  assert.ok(AGENT_L10N.ko.originPushFailed("develop", "e").includes("origin"));
+  assert.ok(AGENT_L10N.en.originPushFailed("develop", "e").includes("origin/develop"));
 });
 
 test("l10n: HIGH-risk skip comment localizes per language", () => {
