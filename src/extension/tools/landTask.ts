@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { runProjectCi } from "../../domain/ci.ts";
 import { landBranch, removeWorktree } from "../../domain/git.ts";
 import { pushBranchAndCreatePr } from "../../domain/github.ts";
-import { addComment, closeTask, getTask, updateTask, issueLang } from "../../domain/tasks.ts";
+import { addComment, closeTask, getTask, updateTask, issueLang, highHoldPatch } from "../../domain/tasks.ts";
 import { addLesson } from "../../domain/lessons.ts";
 import { agentL10n } from "../../domain/l10n.ts";
 import { evaluateRisk } from "../../domain/risk.ts";
@@ -54,11 +54,16 @@ export function register(pi: ExtensionAPI) {
       }
 
       const riskEval = await evaluateRisk(cwd, config, t);
-      if (riskEval.level === "HIGH" && !params.force) {
+      // Persist the human-gated HIGH as `held` so the loop stops re-selecting it
+      // every pass (lesson #314). Force semantics are unchanged: force=true still
+      // bypasses this refusal and never triggers a hold.
+      const hold = highHoldPatch(riskEval.level, Boolean(params.force), riskEval.reasons);
+      if (hold) {
+        updateTask(cwd, params.id, hold);
         // Issue-bound comment: match the issue's language (ja/zh/ko/en), [project] default.
         const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
         addComment(cwd, params.id, "empress", l.highRiskSkip(riskEval.reasons.join("; ")));
-        return reply(JSON.stringify({ merged: false, reason: "HIGH risk", reasons: riskEval.reasons }));
+        return reply(JSON.stringify({ merged: false, reason: "HIGH risk", held: true, reasons: riskEval.reasons }));
       }
 
       const base = config.project?.base_branch;

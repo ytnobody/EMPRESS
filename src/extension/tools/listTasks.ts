@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { listTasks, taskRef } from "../../domain/tasks.ts";
+import { listTasks, taskRef, isHeld } from "../../domain/tasks.ts";
 import { projectDir, reply } from "./helpers.ts";
 
 export function register(pi: ExtensionAPI) {
@@ -19,6 +19,7 @@ export function register(pi: ExtensionAPI) {
         // never a bare #N that could be a PR. Number stays for programmatic use.
         Number: t.id, Ref: taskRef(t), Title: t.title, Status: t.status, assignee: t.assignee,
         labels: t.labels, needs_clarification: t.needs_clarification, branch: t.branch, body: t.body,
+        held: isHeld(t), hold_reason: t.hold_reason || "",
       }))));
     },
   });

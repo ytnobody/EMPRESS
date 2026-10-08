@@ -6,11 +6,12 @@ import { run } from "../../shared/shell.ts";
 import type { LoadedConfig } from "../../shared/config.ts";
 import { resolveRepo, type GithubConfig } from "../github.ts";
 import { localTaskStore } from "./local.ts";
-import { buildMarkdown, withAgentMarker, isAgentAuthor, type StoreDeps, type Task, type TaskInput, type TaskListOpts, type TaskStore, type TaskComment } from "./shared.ts";
+import { buildMarkdown, withAgentMarker, isAgentAuthor, isHeld, sanitizeMetaValue, type StoreDeps, type Task, type TaskInput, type TaskListOpts, type TaskStore, type TaskComment } from "./shared.ts";
 
 // EMPRESS-internal labels (kept out of the user-visible labels array).
 const LBL_INPROGRESS = "status:in-progress";
 const LBL_BLOCKED = "status:blocked";
+const LBL_HELD = "status:held";
 const LBL_NEEDS_CLARIF = "needs-clarification";
 const ASSIGNEE_PREFIX = "assignee:";
 
@@ -43,8 +44,13 @@ function readMeta(body: string, key: string): string {
   return m ? m[1] : "";
 }
 
-export function buildGhBody(bodyHuman: string, branch: string, pr: string): string {
-  const meta = [branch ? `<!--empress:branch=${branch}-->` : "", pr ? `<!--empress:pr=${pr}-->` : ""]
+export function buildGhBody(bodyHuman: string, branch: string, pr: string, holdReason = ""): string {
+  const reason = sanitizeMetaValue(holdReason);
+  const meta = [
+    branch ? `<!--empress:branch=${branch}-->` : "",
+    pr ? `<!--empress:pr=${pr}-->` : "",
+    reason ? `<!--empress:hold_reason=${reason}-->` : "",
+  ]
     .filter(Boolean)
     .join("\n");
   const b = String(bodyHuman || "").trim();
@@ -64,6 +70,7 @@ export function issueToTask(issue: GhIssueJson, repo: string, comments: TaskComm
   const assignee = labels.find((l) => l.startsWith(ASSIGNEE_PREFIX))?.slice(ASSIGNEE_PREFIX.length) ?? "";
   let status: string;
   if (state === "closed") status = "done";
+  else if (labels.includes(LBL_HELD)) status = "held";
   else if (labels.includes(LBL_BLOCKED)) status = "blocked";
   else if (labels.includes(LBL_INPROGRESS)) status = "in-progress";
   else if (assignee) status = "assigned";
@@ -76,13 +83,14 @@ export function issueToTask(issue: GhIssueJson, repo: string, comments: TaskComm
     status,
     assignee,
     labels: labels.filter(
-      (l) => l !== LBL_INPROGRESS && l !== LBL_BLOCKED && l !== LBL_NEEDS_CLARIF && !l.startsWith(ASSIGNEE_PREFIX)
+      (l) => l !== LBL_INPROGRESS && l !== LBL_BLOCKED && l !== LBL_HELD && l !== LBL_NEEDS_CLARIF && !l.startsWith(ASSIGNEE_PREFIX)
     ),
     needs_clarification: labels.includes(LBL_NEEDS_CLARIF),
     branch,
     pr,
     created: issue.createdAt,
     comments,
+    hold_reason: readMeta(issue.body, "hold_reason"),
     body: stripMetadata(issue.body),
     repo,
   };
@@ -95,6 +103,7 @@ export function desiredLabels(t: Pick<Task, "labels" | "needs_clarification" | "
   if (t.assignee) s.add(`${ASSIGNEE_PREFIX}${t.assignee}`);
   if (t.status === "in-progress") s.add(LBL_INPROGRESS);
   if (t.status === "blocked") s.add(LBL_BLOCKED);
+  if (t.status === "held") s.add(LBL_HELD);
   return [...s];
 }
 
@@ -172,10 +181,11 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
       branch: patch.branch ?? current.branch,
       pr: patch.pr ?? current.pr,
       title: patch.title ?? current.title,
+      hold_reason: patch.hold_reason ?? current.hold_reason,
     };
 
     const humanBody = newBody !== undefined ? newBody : stripMetadata(issue.body);
-    const fullBody = buildGhBody(humanBody, next.branch, next.pr);
+    const fullBody = buildGhBody(humanBody, next.branch, next.pr, next.hold_reason);
 
     const desired = new Set(desiredLabels(next));
     const currentLabels = new Set(labelsOf(issue));
@@ -231,7 +241,7 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
       const arr = (JSON.parse(res.stdout) as GhIssueJson[]).sort((a, b) => a.number - b.number);
       return arr
         .map((i) => issueToTask(i, repoFull))
-        .filter((t) => opts.includeAll || (t.status !== "done" && !t.needs_clarification));
+        .filter((t) => opts.includeAll || (t.status !== "done" && !t.needs_clarification && !isHeld(t)));
     } catch {
       return [];
     }
@@ -261,7 +271,7 @@ export function syncLocalToGh(cwd: string, config: LoadedConfig, deps: StoreDeps
   const out: SyncResult[] = [];
   for (const t of localTaskStore(cwd).list({ includeAll: true })) {
     if (t.status === "done") continue;
-    const args = ["issue", "create", "--repo", repoFull, "--title", t.title, "--body", buildGhBody(t.body, t.branch, t.pr)];
+    const args = ["issue", "create", "--repo", repoFull, "--title", t.title, "--body", buildGhBody(t.body, t.branch, t.pr, t.hold_reason)];
     for (const l of desiredLabels(t)) args.push("--label", l);
     const res = exec("gh", args, { timeout: 60000 });
     if (res.code !== 0) throw new Error(`gh issue create failed for task #${t.id}: ${res.stderr.trim() || res.stdout.trim()}`);
