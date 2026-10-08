@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { EMPRESS_DIR } from "../../shared/config.ts";
 import { readMd, writeMd } from "../../shared/frontmatter.ts";
-import { TASK_STATUSES, buildMarkdown, withAgentMarker, isAgentAuthor, type Task, type TaskInput, type TaskStore } from "./shared.ts";
+import { TASK_STATUSES, buildMarkdown, withAgentMarker, isAgentAuthor, isHeld, type Task, type TaskInput, type TaskStore } from "./shared.ts";
 
 function tasksDir(cwd: string): string {
   return path.join(cwd, EMPRESS_DIR, "tasks");
@@ -32,6 +32,7 @@ export function readTaskFile(file: string): Task {
     comments: Array.isArray(frontmatter.comments)
       ? (frontmatter.comments as Task["comments"])
       : [],
+    hold_reason: String(frontmatter.hold_reason ?? ""),
     body,
   };
 }
@@ -107,7 +108,7 @@ export const localTaskStore = (cwd: string): TaskStore => {
   const list: TaskStore["list"] = (opts = {}) =>
     listTaskFiles(cwd)
       .map(readTaskFile)
-      .filter((t) => opts.includeAll || (t.status !== "done" && !t.needs_clarification));
+      .filter((t) => opts.includeAll || (t.status !== "done" && !t.needs_clarification && !isHeld(t)));
 
   const get: TaskStore["get"] = (id) => {
     const file = findTaskFile(cwd, id);
@@ -128,6 +129,7 @@ export const localTaskStore = (cwd: string): TaskStore => {
       "branch",
       "pr",
       "comments",
+      "hold_reason",
     ] as const;
     for (const k of keys) {
       if (k in patch) fm[k] = (patch as Record<string, unknown>)[k];
