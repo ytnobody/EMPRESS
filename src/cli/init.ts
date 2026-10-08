@@ -8,8 +8,10 @@ import { CONFIG_FILENAME, EMPRESS_DIR } from "../shared/config.ts";
 import { writeLoopState as persistState } from "./state.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AGENTS_SRC = path.resolve(__dirname, "..", "agents");
-const PROMPTS_SRC = path.resolve(__dirname, "..", "prompts");
+// Exported so the install-in-sync gate (selfcheck/doctor) compares the exact
+// same source dirs this installer copies from.
+export const AGENTS_SRC = path.resolve(__dirname, "..", "agents");
+export const PROMPTS_SRC = path.resolve(__dirname, "..", "prompts");
 
 /** CLI-accepted init options. Deliberately tolerant: flags from parseFlags are string|boolean. */
 export interface InitOpts {
