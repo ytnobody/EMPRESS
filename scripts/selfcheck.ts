@@ -7,7 +7,9 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "../src/shared/config.ts";
+import { EMPRESS_DIR, loadConfig } from "../src/shared/config.ts";
+import { AGENTS_SRC, PROMPTS_SRC } from "../src/cli/init.ts";
+import { installDrift, installReport } from "../src/domain/install.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let failures = 0;
@@ -22,6 +24,20 @@ if (!cfg.file) {
   failures++;
 } else {
   console.log(`config ok: ${path.relative(root, cfg.file)}`);
+}
+
+// Install-in-sync (Task #81): the committed runtime copies (.empress/agents,
+// .pi/prompts) must be byte-identical to the bundled src/ sources — the same
+// dirs `empress init` copies from. Drift means the harness runs stale prompts.
+const drift = installDrift([
+  { label: "agents", src: AGENTS_SRC, dest: path.join(root, EMPRESS_DIR, "agents") },
+  { label: "prompts", src: PROMPTS_SRC, dest: path.join(root, ".pi", "prompts") },
+]);
+if (drift.length) {
+  console.error(`install-in-sync FAIL: ${installReport(drift)}`);
+  failures++;
+} else {
+  console.log("install-in-sync: PASS");
 }
 
 // Type check (tsc --noEmit): the project is fully typed (371 -> 0); this step

@@ -5,6 +5,8 @@ import { EMPRESS_DIR, loadConfig } from "../shared/config.ts";
 import { run } from "../shared/shell.ts";
 import { isGitRepo } from "../domain/git.ts";
 import { hygieneReport, treeHygieneViolations } from "../domain/hygiene.ts";
+import { installDrift, installReport } from "../domain/install.ts";
+import { AGENTS_SRC, PROMPTS_SRC } from "./init.ts";
 import { jevAvailable } from "../domain/jev.ts";
 
 type Check = [name: string, pass: boolean, msg: string];
@@ -51,6 +53,17 @@ export async function doctor(cwd: string) {
     "repo-tree hygiene",
     hygieneViolations.length === 0,
     hygieneViolations.length === 0 ? "" : hygieneReport(cwd),
+  ]);
+
+  // Install-in-sync (Task #81): installed role/prompt copies must match bundled src/.
+  const installDriftFindings = installDrift([
+    { label: "agents", src: AGENTS_SRC, dest: path.join(cwd, EMPRESS_DIR, "agents") },
+    { label: "prompts", src: PROMPTS_SRC, dest: path.join(cwd, ".pi", "prompts") },
+  ]);
+  checks.push([
+    "role prompts in sync",
+    installDriftFindings.length === 0,
+    installDriftFindings.length === 0 ? "" : installReport(installDriftFindings),
   ]);
 
   let allOk = true;
