@@ -29,7 +29,7 @@
     "bin",
     "src",
     "README.md",
-    "DESIGN.md"
+    "docs"
   ],
   "devDependencies": {
     "@types/bun": "^1.4.2",
