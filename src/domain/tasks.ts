@@ -22,6 +22,10 @@ import {
   resolveLang,
   issueLang,
   CLARIFY_FRAME,
+  isHeld,
+  highHoldPatch,
+  clearHoldPatch,
+  sanitizeMetaValue,
   type SpecProposal,
   TASK_STATUSES,
 } from "./taskstore.ts";
@@ -45,6 +49,10 @@ export {
   resolveLang,
   issueLang,
   CLARIFY_FRAME,
+  isHeld,
+  highHoldPatch,
+  clearHoldPatch,
+  sanitizeMetaValue,
 };
 export type { Task, TaskComment, TaskInput, TaskListOpts, TaskStore, SpecProposal };
 

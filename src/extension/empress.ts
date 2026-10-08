@@ -14,6 +14,8 @@ import { register as registerGetTask } from "./tools/getTask.ts";
 import { register as registerReadiness } from "./tools/readiness.ts";
 import { register as registerApplyClarification } from "./tools/applyClarification.ts";
 import { register as registerAssignTask } from "./tools/assignTask.ts";
+import { register as registerHoldTask } from "./tools/holdTask.ts";
+import { register as registerUnholdTask } from "./tools/unholdTask.ts";
 import { register as registerCreateWorktree } from "./tools/createWorktree.ts";
 import { register as registerSpawnEngineers } from "./tools/spawnEngineers.ts";
 import { register as registerCheckCi } from "./tools/checkCi.ts";
@@ -42,6 +44,8 @@ export default function (pi: ExtensionAPI) {
   registerReadiness(pi);
   registerApplyClarification(pi);
   registerAssignTask(pi);
+  registerHoldTask(pi);
+  registerUnholdTask(pi);
   registerCreateWorktree(pi);
   registerSpawnEngineers(pi);
   registerCheckCi(pi);
