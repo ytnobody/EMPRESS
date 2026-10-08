@@ -91,9 +91,18 @@ export function register(pi: ExtensionAPI) {
         }
       }
 
-      const res = landBranch(cwd, base, t.branch);
+      const res = landBranch(cwd, base, t.branch, { reconcileOrigin: ghCfg.enabled });
       Object.assign(replyBody, res);
-      if (res.merged) {
+      // #94: with [github] enabled, reconcileOrigin pushes base to origin so the
+      // landed commit is not left local-only. If that push FAILS, do not close /
+      // remove the worktree: leave the task open so the next land retries the
+      // (idempotent) merge+push, and doctor surfaces the divergence meanwhile.
+      const originLeftBehind = res.merged && res.pushed === false;
+      if (originLeftBehind) {
+        const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
+        addComment(cwd, params.id, "empress", l.originPushFailed(base, res.pushError || "unknown"));
+      }
+      if (res.merged && !originLeftBehind) {
         // Comments are issue-bound; the auto-lesson is repo-bound ([project] language).
         const l = agentL10n(issueLang(t.title, t.body, config.project?.language || "en"));
         closeTask(cwd, params.id, l.landedNote(base, res.note || ""));
