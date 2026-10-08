@@ -42,9 +42,6 @@ min_body_length = 40
 # webhook_url = "https://hooks.example.com/..."
 # type = "generic"   # slack | discord | generic (auto-detected from URL if omitted)
 
-[run]
-failure_notify_threshold = 3
-
 [ci]
 engine = "podman"
 image = "oven/bun:1.4-alpine"
@@ -54,6 +51,8 @@ network = "default"
 failure_notify_threshold = 3
 wake_interval = 60
 audit_interval = 1800
+pass_timeout = 600
+pass_stall_seconds = 300
 
 # GitHub integration via the gh CLI — ENABLED for ytnobody/EMPRESS.
 # Pushes landed task branches to origin and opens PRs against base_branch.

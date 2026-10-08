@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parseToml, mergeConfig, resolveProjectRoot } from "../src/shared/config.js";
+import { fileURLToPath } from "node:url";
+import { parseToml, mergeConfig, resolveProjectRoot, loadConfig } from "../src/shared/config.js";
 
 // Verifies: the TOML-subset parser turns `[section]` headers plus `key = value`
 // scalars into one nested object, ignoring `#` comments and blank lines.
@@ -82,4 +83,31 @@ test("config: [github] integration is opt-in (disabled by default)", () => {
     mergeConfig({ github: { enabled: false, owner: "", repo: "" } }, parseToml("[github]\n")).github.enabled,
     false
   );
+});
+
+// Verifies: the shipped .empress/empress.toml is valid standard TOML — exactly
+// one [run] table, so Bun.TOML.parse (which throws "Cannot redefine table 'run'"
+// on a duplicate) succeeds — and loadConfig resolves the same effective [run]
+// values that the duplicate-table file used to yield (last table wins, defaults
+// fill pass_timeout/pass_stall_seconds).
+test("config: shipped .empress/empress.toml has a single [run] table and stable effective values", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const text = fs.readFileSync(path.join(root, ".empress", "empress.toml"), "utf-8");
+  // A duplicate [run] makes standard TOML parsers throw; a single table parses.
+  assert.doesNotThrow(() => Bun.TOML.parse(text));
+  const parsed = Bun.TOML.parse(text);
+  assert.deepEqual(Object.keys(parsed.run).sort(), [
+    "audit_interval",
+    "failure_notify_threshold",
+    "pass_stall_seconds",
+    "pass_timeout",
+    "wake_interval",
+  ]);
+  assert.deepEqual(loadConfig(root).run, {
+    failure_notify_threshold: 3,
+    wake_interval: 60,
+    audit_interval: 1800,
+    pass_timeout: 600,
+    pass_stall_seconds: 300,
+  });
 });
