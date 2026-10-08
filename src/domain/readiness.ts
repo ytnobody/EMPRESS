@@ -118,7 +118,7 @@ interface ProposalFrame {
 }
 
 // Human-visible framing of the proposal comment, keyed by detected language. The
-// template is pinned by docs/design-task-35.md (verbatim match with the pre-split
+// template is pinned by docs/design/design-task-35.md (verbatim match with the pre-split
 // empress_readiness output so already-posted proposals dedupe identically); the
 // spec content itself comes from proposeSpec (taskstore/shared.ts).
 const EN_FRAME: ProposalFrame = {
