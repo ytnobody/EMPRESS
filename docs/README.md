@@ -26,15 +26,18 @@ local tasks to issues.
 | `git-land-origin-merge.md` | drop the doomed origin-merge line in `git.landBranch` |
 | `readiness-jev-degradation.md` | `checkReadyTasks` Jev-error fallback (task #7) |
 | `triage-scandiff-patterns.md` | triage `scanDiff` L1 patterns (SSRF / XXE / `sh -c` injection) |
+| `task-05-ci-deps-relink-poisoning.md` | heal the CI deps-mount `node_modules` relink so a container run never poisons the host symlink |
 | `task-08-triage-convention-signals.md` | triage convention signals from the `diffBetween` changed list |
 | `task-10-type-shared.md` | type `src/shared/*` (shell/frontmatter/config) to zero errors |
 | `task-16-bun-lock-vuln-scan.md` | `empress_vuln_check` recognizes `bun.lock` (no silent dep-CVE no-op) |
 | `task-18-gh-issue-taskstore.md` | GitHub-issue-backed task store (`GhTaskStore`) when `[github] enabled` |
+| `task-19-mutation-jev-gate.md` | mutation-testing + Jev gate (`empress_check_mutation`) for deterministic weak-test detection |
+| `task-32-agent-comment-marker.md` | agent-vs-human comment detection via the `<!--empress:agent=…-->` marker, not the `**[agent]**` prefix |
 
 ## design/ index
 
 Per-task design docs (behavior spec + interface shape + verification arithmetic).
-The `docs/ root` holds only this index README plus the two top-level docs named
+The `docs/` root holds only this index README plus the two top-level docs named
 above (`architecture.md`, `release.md`) and the `decisions/` + `design/` dirs.
 
 | File | Design covered |
@@ -55,5 +58,7 @@ above (`architecture.md`, `release.md`) and the `decisions/` + `design/` dirs.
 ## Conventions
 - New per-task design docs go under `docs/design/`; new design decisions go under
   `docs/decisions/` — both with a descriptive kebab-case name. The `docs/` root
-  is an index only (this `README.md`); the code/CLI live in `src/`, prompts in
-  `src/agents` + `src/prompts` (installed into `.empress/` and `.pi/`).
+  holds this index `README.md`, the two top-level docs (`architecture.md`,
+  `release.md`), and the `decisions/` + `design/` dirs; the code/CLI live in
+  `src/`, prompts in `src/agents` + `src/prompts` (installed into `.empress/`
+  and `.pi/`).
