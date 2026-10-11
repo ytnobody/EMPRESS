@@ -369,8 +369,6 @@ export function originUpdateCommand(base: string, originBaseExists: boolean): { 
     : null;
 }
 
-/* eslint-disable no-unused-vars */
-
 /**
  * Land a task branch into base locally. Returns { merged, fastForwarded, note }.
  * Does NOT run tests — callers handle CI gating before landing.
@@ -378,8 +376,7 @@ export function originUpdateCommand(base: string, originBaseExists: boolean): { 
 export function landBranch(
   cwd: string,
   base: string,
-  branch: string,
-  { force = false }: { force?: boolean } = {}
+  branch: string
 ): { merged: boolean; fastForwarded?: boolean; note?: string } {
   const current = currentBranch(cwd);
   if (!current) return { merged: false, note: "not a git repo" };
