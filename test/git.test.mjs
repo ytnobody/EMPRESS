@@ -475,3 +475,148 @@ test("pruneStaleMergedBranches: PR-merged managed-worktree branch KEPT unscoped,
   }
 });
 
+
+// #94 — land must not leave origin/<base> behind (local base divergence).
+// Policy (a): after a successful local merge with github enabled, push the base
+// branch to origin; a deterministic doctor check detects any residual drift.
+import { originPushCommand, decideBaseDivergence, baseDivergence, landBranch } from "../src/domain/git.js";
+import { baseDivergenceCheck } from "../src/cli/doctor.js";
+
+// Verifies: a local-only repo (no origin/<base> ref) emits NO push Command, so a
+// doomed `git push origin <base>` is never run. (Spec: local-only repos are
+// unaffected by origin reconciliation.)
+test("originPushCommand: returns null when origin base ref is absent", () => {
+  assert.equal(originPushCommand("develop", false), null);
+});
+
+// Verifies: when origin/<base> exists, the reconcile Command pushes the LOCAL
+// base to the remote base (`<base>:<base>`), with base safely interpolated.
+// (Spec: origin receives exactly the landed commit.)
+test("originPushCommand: emits non-forced base push when origin ref exists", () => {
+  const cmd = originPushCommand("develop", true);
+  assert.deepEqual(cmd, { cmd: "git", args: ["push", "origin", "develop:develop"] });
+  assert.ok(!cmd.args.includes("--force"), "reconcile never force-pushes");
+});
+
+// Verifies: a branch base name is the only interpolated part of the refspec.
+test("originPushCommand: interpolates the base branch into <base>:<base>", () => {
+  assert.deepEqual(originPushCommand("release/v1", true).args, ["push", "origin", "release/v1:release/v1"]);
+});
+
+// Verifies: divergence is decided arithmetically from (ahead, originExists) —
+// ahead>0 with an origin ref is divergent; zero-ahead or no-origin is not.
+test("decideBaseDivergence: only ahead>0 with an origin ref is divergent", () => {
+  assert.equal(decideBaseDivergence(3, true), true);
+  assert.equal(decideBaseDivergence(0, true), false);
+  assert.equal(decideBaseDivergence(3, false), false);
+});
+
+// Fixture: a repo with a bare `origin` remote and develop pushed to it.
+function repoWithOrigin() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-origin-"));
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), "empress-remote-"));
+  const g = (args, cwd = dir) => execFileSync("git", ["-C", cwd, ...args], { stdio: "pipe", encoding: "utf-8" });
+  g(["init", "-q", "-b", "develop"]);
+  g(["config", "user.email", "t@t"]);
+  g(["config", "user.name", "t"]);
+  g(["commit", "-q", "--allow-empty", "-m", "A"]);
+  g(["init", "-q", "--bare", remote]);
+  g(["remote", "add", "origin", remote]);
+  g(["push", "-q", "-u", "origin", "develop"]);
+  return { dir, remote, g };
+}
+
+// Verifies (end-to-end on a real fixture): landing with reconcileOrigin:true
+// pushes base, so origin/develop receives the commit and baseDivergence reports
+// no drift; a SECOND land keeps origin in sync too (the one-shot sync class
+// #77/#80/#93 is not needed). Spec: origin/<base> is never left behind.
+test("landBranch: reconcileOrigin pushes base, and a second land keeps origin in sync", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const { dir, remote, g } = repoWithOrigin();
+  try {
+    const feature = (name) => {
+      g(["checkout", "-q", "-b", name]);
+      fs.writeFileSync(path.join(dir, `${name.replace(/\//g, "-")}.txt`), `${name}\n`);
+      g(["add", "-A"]); g(["commit", "-qm", name]);
+      g(["checkout", "-q", "develop"]);
+    };
+    feature("empress/task-94a");
+    const first = landBranch(dir, "develop", "empress/task-94a", { reconcileOrigin: true });
+    assert.equal(first.merged, true, `first land merged: ${JSON.stringify(first)}`);
+    assert.equal(first.pushed, true, `first land pushed: ${JSON.stringify(first)}`);
+    assert.equal(baseDivergence(dir, "develop").diverged, false, "origin/develop not left behind after first land");
+
+    feature("empress/task-94b");
+    const second = landBranch(dir, "develop", "empress/task-94b", { reconcileOrigin: true });
+    assert.equal(second.merged, true);
+    assert.equal(second.pushed, true);
+    assert.equal(baseDivergence(dir, "develop").diverged, false, "second land does not reintroduce divergence");
+
+    // origin/develop tip equals local develop tip (both commits landed remotely)
+    const originTip = execFileSync("git", ["-C", dir, "rev-parse", "origin/develop"], { encoding: "utf-8" }).trim();
+    const localTip = execFileSync("git", ["-C", dir, "rev-parse", "develop"], { encoding: "utf-8" }).trim();
+    assert.equal(originTip, localTip);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+// Verifies: without reconciliation, local develop drifts ahead of origin/develop
+// — and the doctor indicator detects + surfaces it (fail + "ahead" message).
+// Spec: a deterministic check catches the divergence the root cause used to hide.
+test("baseDivergence + doctor check: detect local base ahead of origin/<base>", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const { dir, remote, g } = repoWithOrigin();
+  try {
+    g(["checkout", "-q", "-b", "empress/task-94c"]);
+    fs.writeFileSync(path.join(dir, "c.txt"), "c\n");
+    g(["add", "-A"]); g(["commit", "-qm", "C"]);
+    g(["checkout", "-q", "develop"]);
+    const res = landBranch(dir, "develop", "empress/task-94c"); // NO reconcile -> drift created
+    assert.equal(res.merged, true);
+    assert.equal(res.pushed, undefined, "no push attempted without reconcileOrigin");
+
+    const div = baseDivergence(dir, "develop");
+    assert.equal(div.originBaseExists, true);
+    assert.equal(div.diverged, true);
+    assert.ok(div.ahead > 0, `ahead should be >0, got ${div.ahead}`);
+
+    const [name, pass, msg] = baseDivergenceCheck(dir, "develop");
+    assert.match(name, /base not ahead of origin\/develop/);
+    assert.equal(pass, false, "doctor check fails on drift");
+    assert.match(msg, /ahead/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+// Verifies: a local-only repo (no origin remote) is never reported divergent —
+// the doctor indicator skips it rather than failing a remote-less project.
+test("baseDivergence: local-only repo (no origin) is not divergent", (t) => {
+  if (!gitAvailable()) {
+    t.skip("git not available");
+    return;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "empress-localonly-"));
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe", encoding: "utf-8" });
+  try {
+    g(["init", "-q", "-b", "develop"]);
+    g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+    g(["commit", "-q", "--allow-empty", "-m", "A"]);
+    const div = baseDivergence(dir, "develop");
+    assert.equal(div.originBaseExists, false);
+    assert.equal(div.diverged, false);
+    const [, pass] = baseDivergenceCheck(dir, "develop");
+    assert.equal(pass, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
