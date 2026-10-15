@@ -51,7 +51,12 @@ export function register(pi: ExtensionAPI) {
             `(reason: ${verdict.reasons.join("; ")})`,
           ].join("\n");
           addComment(cwd, params.id, "empress", proposal);
-
+        }
+        // Persist the held marker on EVERY not-ready verdict, independent of the
+        // proposal dedupe: a prior pass may have posted the comment but lost the
+        // marker write (task #102), and the dedupe guard must not also block the
+        // marker — otherwise the task is re-selected as actionable every pass.
+        if (!t.needs_clarification) {
           updateTask(cwd, params.id, { needs_clarification: true, status: "blocked" });
           t.needs_clarification = true;
         }
