@@ -17,6 +17,10 @@ export {
   proposeSpec,
   CLARIFY_FRAME,
   taskBrief,
+  isHeld,
+  highHoldPatch,
+  clearHoldPatch,
+  sanitizeMetaValue,
 agentMarker, taskRef, normalizeTitle, editDistance, titlesNearMatch, findTitleDuplicate,
 } from "./taskstore/shared.ts";
 export { readTaskFile, listTaskFiles, localTaskStore } from "./taskstore/local.ts";
