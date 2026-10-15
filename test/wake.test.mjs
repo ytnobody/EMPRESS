@@ -219,6 +219,24 @@ test("postClarifyProposals: posts proposal + marks blocked; repeats dedupe to 0"
   assert.deepEqual(r2.pendingReply, []);
 });
 
+// Verifies (task #102): the held marker is persisted even when a proposal comment
+// already exists — an already-proposed task that was never marked (gh #101: the
+// comment posted but the label write was lost) must still leave the actionable
+// queue, and no duplicate proposal is posted.
+test("postClarifyProposals: marks an already-proposed task that lost its marker", () => {
+  const dir = clarifyTmpdir();
+  const created = localTaskStore(dir).create({ title: "Title only" });
+  // Simulate the gh #101 state: a proposal comment exists, the task is unmarked.
+  localTaskStore(dir).addComment(created.id, "empress", `draft <!--${CLARIFY_PROPOSAL_MARKER}-->`);
+  const unmarked = getTask(dir, created.id);
+  assert.equal(unmarked.needs_clarification, false, "precondition: marker lost");
+  const r = postClarifyProposals(dir, [{ task: unmarked, reasons: ["Jev confidence 0.05 < 0.6"] }]);
+  assert.equal(r.posted, 0, "no duplicate proposal");
+  const marked = getTask(dir, created.id);
+  assert.equal(marked.needs_clarification, true, "marker persisted despite the existing proposal");
+  assert.equal(marked.status, "blocked");
+});
+
 // Verifies: pendingReply is the single-reply pick-up gate — a plain (non-agent)
 // latest comment counts as a pending human reply and no new proposal is posted for
 // an already-proposed task; an agent follow-up comment does NOT count.
