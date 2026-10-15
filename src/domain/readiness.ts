@@ -192,8 +192,14 @@ export function postClarifyProposals(cwd: string, checks: ClarifyPlanCheck[]): {
     if (!fresh) continue;
     for (const plan of planClarifyProposals([{ task: fresh, reasons: check.reasons }])) {
       addComment(cwd, plan.taskId, "empress", plan.comment);
-      updateTask(cwd, plan.taskId, { needs_clarification: true, status: "blocked" });
       posted++;
+    }
+    // Persist the held marker on EVERY not-ready check, independent of the
+    // proposal dedupe (task #102): an already-proposed task whose marker was lost
+    // (gh #101: comment posted, label write failed) must still leave the
+    // actionable queue instead of being re-selected every pass.
+    if (!fresh.needs_clarification) {
+      updateTask(cwd, check.task.id, { needs_clarification: true, status: "blocked" });
     }
     if (hasHumanReply(fresh)) pendingReply.push(fresh.id);
   }

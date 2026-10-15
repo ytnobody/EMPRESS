@@ -44,6 +44,49 @@ function ghIssue(n, over = {}) {
   return { number: n, title: `task ${n}`, state: "open", createdAt: "x", body: "body", labels: [], ...over };
 }
 
+// A stateful fake `gh`: applies `issue edit --add-label/--remove-label` mutations
+// to the stored issue so list()/get() reflect a persisted label (unlike
+// makeFakeDeps, which returns a static issue). Used by the task-102 marker tests.
+function makeStatefulGh(calls, issues = { 7: ghIssue(7) }) {
+  const state = structuredClone(issues);
+  const ok = (stdout = "") => ({ code: 0, stdout, stderr: "", signal: null });
+  const run = (_cmd, args) => {
+    calls.push([_cmd, ...args]);
+    if (_cmd !== "gh") return ok("[]");
+    if (args[0] === "--version") return ok("");
+    if (args[0] === "api" && args[2] === "--jq") {
+      const m = /\/issues\/(\d+)$/.exec(args[1]);
+      const n = m ? Number(m[1]) : NaN;
+      return state[n] !== undefined ? ok(JSON.stringify(state[n])) : { code: 1, stdout: "", stderr: "HTTP 404", signal: null };
+    }
+    if (args[0] === "api" && String(args[1]).endsWith("/comments")) {
+      return args.includes("POST") ? ok("") : ok("[]"); // GET comments
+    }
+    if (args[0] === "issue" && args[1] === "edit") {
+      const issue = state[Number(args[2])];
+      if (!issue) return { code: 1, stdout: "", stderr: "not found", signal: null };
+      const labels = new Set(issue.labels.map((l) => l.name));
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === "--add-label") labels.add(args[i + 1]);
+        if (args[i] === "--remove-label") labels.delete(args[i + 1]);
+        if (args[i] === "--body") issue.body = args[i + 1];
+        if (args[i] === "--title") issue.title = args[i + 1];
+      }
+      issue.labels = [...labels].map((name) => ({ name }));
+      return ok("");
+    }
+    if (args[0] === "label" && args[1] === "create") return ok("");
+    if (args[0] === "issue" && (args[1] === "close" || args[1] === "reopen")) {
+      const issue = state[Number(args[2])];
+      if (issue) issue.state = args[1] === "close" ? "closed" : "open";
+      return ok("");
+    }
+    if (args[0] === "issue" && args[1] === "list") return ok(JSON.stringify(Object.values(state)));
+    return ok("[]");
+  };
+  return { run, state };
+}
+
 // ---------------------------------------------------------------------------
 // Local store (regression via the tasks.js delegate API)
 // ---------------------------------------------------------------------------
@@ -221,6 +264,44 @@ test("taskstore: gh store still closes/edits genuine issues", () => {
   assert.equal(t.kind, "issue");
   assert.ok(store.close(7) !== null);
   assert.ok(calls.some((c) => c[0] === "gh" && c[1] === "issue" && c[2] === "close" && c[3] === "7"));
+});
+
+// Verifies (task #102, Command verification): the update ensures each EMPRESS
+// internal label exists in the repo (`gh label create … --force`) BEFORE the
+// issue edit, then adds it — a missing label made the whole edit fail silently,
+// which is how the needs-clarification marker was lost (gh #101).
+test("taskstore: gh update ensures internal labels exist before --add-label", () => {
+  const calls = [];
+  const { run } = makeStatefulGh(calls, { 7: ghIssue(7) });
+  const store = ghTaskStore(process.cwd(), { enabled: true, owner: "ytnobody", repo: "EMPRESS" }, { run });
+  const t = store.update(7, { needs_clarification: true, status: "blocked" });
+  const creates = calls.filter((c) => c[0] === "gh" && c[1] === "label" && c[2] === "create");
+  assert.deepEqual(creates.map((c) => c[3]).sort(), ["needs-clarification", "status:blocked"], "both missing internal labels created");
+  assert.ok(creates.every((c) => c.includes("--force")), "label create is idempotent (--force)");
+  const edit = calls.find((c) => c[0] === "gh" && c[1] === "issue" && c[2] === "edit");
+  const createIdx = calls.findIndex((c) => c[0] === "gh" && c[1] === "label" && c[2] === "create");
+  const editIdx = calls.findIndex((c) => c[0] === "gh" && c[1] === "issue" && c[2] === "edit");
+  assert.ok(createIdx < editIdx, "labels are ensured before the edit");
+  assert.ok(edit.includes("--add-label") && edit.includes("needs-clarification"));
+  assert.equal(t.needs_clarification, true);
+});
+
+// Verifies (task #102 acceptance): the persisted gh marker hides a not-ready task
+// from the default empress_list_tasks output, include_all still surfaces it, and
+// clearing the marker (empress_apply_clarification path) returns it to actionable
+// — matching local-mode behaviour.
+test("taskstore: gh needs-clarification round-trip hides then restores a task", () => {
+  const calls = [];
+  const { run } = makeStatefulGh(calls, { 7: ghIssue(7) });
+  const store = ghTaskStore(process.cwd(), { enabled: true, owner: "ytnobody", repo: "EMPRESS" }, { run });
+  assert.equal(store.list().length, 1, "actionable before marking");
+  store.update(7, { needs_clarification: true, status: "blocked" });
+  assert.equal(store.list().length, 0, "hidden from the default list after marking");
+  const all = store.list({ includeAll: true });
+  assert.equal(all.length, 1);
+  assert.equal(all[0].needs_clarification, true);
+  store.update(7, { needs_clarification: false, status: "open" }, "resolved spec body");
+  assert.equal(store.list().length, 1, "clearing the marker returns the task to actionable");
 });
 
 test("taskstore: desiredLabels builds the internal label set for a task state", () => {
