@@ -297,6 +297,22 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
 }
 
 /**
+ * Parse `git for-each-ref --format=%(refname:short) refs/remotes/<remote>/`
+ * output into branch short names. Git can emit a bare '<remote>' line for the
+ * remote HEAD symref (git 2.50.1); that is not a branch, so it — and any
+ * resulting empty short — is dropped here, before pruning decisions (so it is
+ * neither pruned nor listed as kept).
+ */
+export function remoteBranchShorts(output: string, remote: string): string[] {
+  const prefix = `${remote}/`;
+  return output
+    .split("\n")
+    .filter((ref) => ref.startsWith(prefix))
+    .map((ref) => ref.slice(prefix.length))
+    .filter(Boolean);
+}
+
+/**
  * Pure decision for pruning stale merged REMOTE-tracking branches: given each
  * ref's short name + already-computed merge status, decide which to delete and
  * which to skip. Only refs that are merged AND not protected are pruned.
@@ -328,12 +344,9 @@ export function decideRemotePrunes(refs: Array<{ short: string; merged: boolean 
 export function pruneStaleMergedRemoteBranches(cwd: string, base: string, opts: { keep?: string[]; remote?: string } = {}): BranchPruneResult {
   const remote = opts.remote || "origin";
   const keep = opts.keep || [];
-  const refs = (git(cwd, "for-each-ref", "--format=%(refname:short)", `refs/remotes/${remote}/`) || "")
-    .split("\n")
-    .filter(Boolean)
-    .map((ref) => {
-      const short = ref.slice(remote.length + 1);
-      const merged = run("git", ["-C", cwd, "merge-base", "--is-ancestor", ref, base]).code === 0;
+  const refs = remoteBranchShorts(git(cwd, "for-each-ref", "--format=%(refname:short)", `refs/remotes/${remote}/`) || "", remote)
+    .map((short) => {
+      const merged = run("git", ["-C", cwd, "merge-base", "--is-ancestor", `${remote}/${short}`, base]).code === 0;
       return { short, merged };
     });
   const { prune, skip } = decideRemotePrunes(refs, base, keep);

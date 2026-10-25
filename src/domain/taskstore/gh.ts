@@ -14,6 +14,24 @@ const LBL_BLOCKED = "status:blocked";
 const LBL_NEEDS_CLARIF = "needs-clarification";
 const ASSIGNEE_PREFIX = "assignee:";
 
+// EMPRESS-owned labels are created on demand before adding them: `gh issue edit
+// --add-label` fails the WHOLE edit when a label does not exist in the repo, and
+// the failure was swallowed — the root cause of task #102 (a not-ready gh task's
+// needs-clarification marker was never written, so it stayed actionable every
+// pass). `--force` makes the create idempotent; the colors are EMPRESS-owned, so
+// no user label is clobbered.
+const INTERNAL_LABEL_COLORS: Record<string, string> = {
+  [LBL_INPROGRESS]: "fbca04",
+  [LBL_BLOCKED]: "d93f0b",
+  [LBL_NEEDS_CLARIF]: "d4c5f9",
+};
+const ASSIGNEE_LABEL_COLOR = "bfd4f2";
+
+/** EMPRESS-owned label color, or null when the label is not ours (never create user labels). */
+function internalLabelColor(label: string): string | null {
+  return INTERNAL_LABEL_COLORS[label] ?? (label.startsWith(ASSIGNEE_PREFIX) ? ASSIGNEE_LABEL_COLOR : null);
+}
+
 // Runtime metadata (branch / pr) is stored as HTML comments hidden in the body.
 const META_RE = /<!--empress:([a-z_]+)=([^>]*)-->/g;
 
@@ -184,7 +202,11 @@ export const ghTaskStore = (cwd: string, cfg: GithubConfig, deps: StoreDeps = {}
 
     const args = ["issue", "edit", String(id), ...repoFlag(), "--body", fullBody];
     if (patch.title !== undefined) args.push("--title", patch.title);
-    for (const l of toAdd) args.push("--add-label", l);
+    for (const l of toAdd) {
+      const color = internalLabelColor(l);
+      if (color) gh(["label", "create", l, ...repoFlag(), "--color", color, "--force"]);
+      args.push("--add-label", l);
+    }
     for (const l of toRemove) args.push("--remove-label", l);
     gh(args);
 

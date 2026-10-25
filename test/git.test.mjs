@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pruneStaleMergedBranches, decideRemotePrunes, worktreesForBranch } from "../src/domain/git.js";
+import { pruneStaleMergedBranches, decideRemotePrunes, remoteBranchShorts, worktreesForBranch } from "../src/domain/git.js";
 
 function gitAvailable() {
   try {
@@ -249,6 +249,21 @@ test("decideRemotePrunes: keep-list protects merged branches from pruning", () =
   const res = decideRemotePrunes([{ short: "empress/task-1", merged: true }], "develop", ["empress/task-1"]);
   assert.deepEqual(res.prune, []);
   assert.deepEqual(res.skip, ["empress/task-1"]);
+});
+
+// Verifies: a bare '<remote>' line in for-each-ref output — the origin/HEAD
+// symref as git 2.50.1 emits it under refs/remotes/origin/ — is dropped at parse
+// time, so it lands in NEITHER prune nor skip (previously its empty short
+// rendered as a leading empty entry in audit's "Kept remote branch(es)" line).
+// Spec-derived: merged+unprotected -> prune; protected (main) -> skip; the HEAD
+// symref is not a branch -> nowhere.
+test("remoteBranchShorts + decideRemotePrunes: bare '<remote>' HEAD symref is neither pruned nor skipped", () => {
+  const output = ["origin", "origin/empress/task-3", "origin/main", ""].join("\n");
+  const shorts = remoteBranchShorts(output, "origin");
+  assert.deepEqual(shorts, ["empress/task-3", "main"]);
+  const { prune, skip } = decideRemotePrunes(shorts.map((short) => ({ short, merged: true })), "develop", []);
+  assert.deepEqual(prune, ["empress/task-3"]);
+  assert.deepEqual(skip, ["main"]);
 });
 
 // mergeConflict (Task #52): LLM-free conflict detection via git merge-tree.
