@@ -297,6 +297,22 @@ export function pruneStaleMergedBranches(cwd: string, base: string, opts: { keep
 }
 
 /**
+ * Parse `git for-each-ref --format=%(refname:short) refs/remotes/<remote>/`
+ * output into branch short names. Git can emit a bare '<remote>' line for the
+ * remote HEAD symref (git 2.50.1); that is not a branch, so it — and any
+ * resulting empty short — is dropped here, before pruning decisions (so it is
+ * neither pruned nor listed as kept).
+ */
+export function remoteBranchShorts(output: string, remote: string): string[] {
+  const prefix = `${remote}/`;
+  return output
+    .split("\n")
+    .filter((ref) => ref.startsWith(prefix))
+    .map((ref) => ref.slice(prefix.length))
+    .filter(Boolean);
+}
+
+/**
  * Pure decision for pruning stale merged REMOTE-tracking branches: given each
  * ref's short name + already-computed merge status, decide which to delete and
  * which to skip. Only refs that are merged AND not protected are pruned.
@@ -328,12 +344,9 @@ export function decideRemotePrunes(refs: Array<{ short: string; merged: boolean 
 export function pruneStaleMergedRemoteBranches(cwd: string, base: string, opts: { keep?: string[]; remote?: string } = {}): BranchPruneResult {
   const remote = opts.remote || "origin";
   const keep = opts.keep || [];
-  const refs = (git(cwd, "for-each-ref", "--format=%(refname:short)", `refs/remotes/${remote}/`) || "")
-    .split("\n")
-    .filter(Boolean)
-    .map((ref) => {
-      const short = ref.slice(remote.length + 1);
-      const merged = run("git", ["-C", cwd, "merge-base", "--is-ancestor", ref, base]).code === 0;
+  const refs = remoteBranchShorts(git(cwd, "for-each-ref", "--format=%(refname:short)", `refs/remotes/${remote}/`) || "", remote)
+    .map((short) => {
+      const merged = run("git", ["-C", cwd, "merge-base", "--is-ancestor", `${remote}/${short}`, base]).code === 0;
       return { short, merged };
     });
   const { prune, skip } = decideRemotePrunes(refs, base, keep);
@@ -370,14 +383,64 @@ export function originUpdateCommand(base: string, originBaseExists: boolean): { 
 }
 
 /**
- * Land a task branch into base locally. Returns { merged, fastForwarded, note }.
+ * Pure decision for origin reconciliation after a local land (#94): emit
+ * `git push origin <base>:<base>` to bring origin/<base> up to local base iff the
+ * origin base ref exists. Returns null (no-op) for local-only repos. NEVER
+ * force: a rejected non-fast-forward push is reported, not overridden, so a
+ * diverged/advanced remote is never clobbered.
+ */
+export function originPushCommand(base: string, originBaseExists: boolean): { cmd: string; args: string[] } | null {
+  return originBaseExists ? { cmd: "git", args: ["push", "origin", `${base}:${base}`] } : null;
+}
+
+/**
+ * Pure decision for the base/origin divergence indicator (#94): local base is
+ * divergent iff origin/<base> exists AND local base has commits origin lacks
+ * (ahead > 0). A local-only repo (no origin ref) is never divergent by
+ * definition. Command-verification target; the git state is gathered by
+ * `baseDivergence` below.
+ */
+export function decideBaseDivergence(ahead: number, originBaseExists: boolean): boolean {
+  return originBaseExists && ahead > 0;
+}
+
+export interface BaseDivergence {
+  originBaseExists: boolean;
+  ahead: number;
+  diverged: boolean;
+}
+
+/**
+ * Read-only executor for the divergence indicator: count commits local base has
+ * that origin/<base> lacks. `diverged` is the pure decision above. This is what
+ * `empress doctor` surfaces so an auto-landed commit never silently stays local.
+ */
+export function baseDivergence(cwd: string, base: string): BaseDivergence {
+  const originBaseExists =
+    git(cwd, "show-ref", "--verify", "--quiet", `refs/remotes/origin/${base}`) !== null;
+  const ahead = originBaseExists
+    ? parseInt(git(cwd, "rev-list", "--count", `origin/${base}..${base}`) || "0", 10) || 0
+    : 0;
+  return { originBaseExists, ahead, diverged: decideBaseDivergence(ahead, originBaseExists) };
+}
+
+/**
+ * Land a task branch into base locally. Returns
+ * { merged, fastForwarded, pushed?, pushError?, note }.
  * Does NOT run tests — callers handle CI gating before landing.
+ *
+ * `reconcileOrigin` (#94): when true and origin/<base> exists, push base after a
+ * successful merge so origin/<base> receives the landed commit (the PR then
+ * auto-closes as merged). This is what prevents the recurring local-base drift
+ * when [github] is enabled. Never force-pushes: a rejected push is reported and
+ * the caller can retry via the (idempotent) next land.
  */
 export function landBranch(
   cwd: string,
   base: string,
-  branch: string
-): { merged: boolean; fastForwarded?: boolean; note?: string } {
+  branch: string,
+  { reconcileOrigin = false }: { reconcileOrigin?: boolean } = {}
+): { merged: boolean; fastForwarded?: boolean; pushed?: boolean; pushError?: string; note?: string } {
   const current = currentBranch(cwd);
   if (!current) return { merged: false, note: "not a git repo" };
   if (!branchExists(cwd, branch)) return { merged: false, note: `branch "${branch}" does not exist` };
@@ -395,12 +458,34 @@ export function landBranch(
   const originCmd = originUpdateCommand(base, originRefExists);
   if (originCmd) run(originCmd.cmd, ["-C", cwd, ...originCmd.args]);
 
+  // On a successful merge, optionally reconcile origin (push base). Local-only
+  // repos (no origin ref) get a no-op.
+  const finish = (fastForwarded: boolean, note: string) => {
+    const out: { merged: boolean; fastForwarded?: boolean; pushed?: boolean; pushError?: string; note?: string } = {
+      merged: true,
+      fastForwarded,
+      note,
+    };
+    if (reconcileOrigin) {
+      const cmd = originPushCommand(base, originRefExists);
+      if (cmd) {
+        const push = run(cmd.cmd, ["-C", cwd, ...cmd.args]);
+        if (push.code === 0) out.pushed = true;
+        else {
+          out.pushed = false;
+          out.pushError = push.stderr.trim() || push.stdout.trim();
+        }
+      }
+    }
+    return out;
+  };
+
   const merge = run("git", ["-C", cwd, "merge", "--no-edit", "--ff-only", branch]);
-  if (merge.code === 0) return { merged: true, fastForwarded: true, note: "fast-forwarded" };
+  if (merge.code === 0) return finish(true, "fast-forwarded");
 
   // fall back to a merge commit
   const mergeCommit = run("git", ["-C", cwd, "merge", "--no-edit", branch]);
-  if (mergeCommit.code === 0) return { merged: true, fastForwarded: false, note: "merged with commit" };
+  if (mergeCommit.code === 0) return finish(false, "merged with commit");
 
   return { merged: false, note: `merge failed: ${merge.stderr || mergeCommit.stderr}` };
 
