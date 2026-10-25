@@ -37,7 +37,7 @@ export function isAgentAuthor(author: string): boolean {
   return AGENT_AUTHORS.has(author);
 }
 
-export const TASK_STATUSES: string[] = ["open", "assigned", "in-progress", "done", "blocked"];
+export const TASK_STATUSES: string[] = ["open", "assigned", "in-progress", "done", "blocked", "held"];
 
 export interface TaskComment {
   at: string;
@@ -58,6 +58,8 @@ export interface Task {
   created: string;
   comments: TaskComment[];
   body: string;
+  /** Why the task is held for a human (set with status "held"). */
+  hold_reason?: string;
   /**
    * What the number refers to. Issues and PRs share GitHub numbering, so a
    * gh-backed number is "issue" or "pr"; local file tasks are "local"
@@ -217,6 +219,47 @@ export function hasHumanReply(t: Task): boolean {
   if (!t.comments || t.comments.length === 0) return false;
   const last = t.comments[t.comments.length - 1];
   return !AGENT_MARKER_RE.test(String(last.body || ""));
+}
+
+/**
+ * Sanitize a value before embedding it in gh HTML-comment metadata. A hold
+ * reason can contain a git-controlled file path, so a `-->` or newline in it
+ * must not be able to close the `<!--empress:...-->` metadata field early.
+ */
+export function sanitizeMetaValue(v: string): string {
+  return String(v || "").replace(/>/g, "→").replace(/[\r\n]+/g, " ").trim().slice(0, 500);
+}
+
+/**
+ * Effective hold test. A task is held only while its status is "held" AND no
+ * human has replied since the hold (the latest comment is agent). `merged` is
+ * supplied by the impure git probe (branch already an ancestor of base = the
+ * human merged it, which clears the hold) so this stays a pure decision.
+ */
+export function isHeld(t: Pick<Task, "status" | "comments">, merged = false): boolean {
+  if (t.status !== "held") return false;
+  if (merged) return false;
+  return !hasHumanReply(t as Task);
+}
+
+/**
+ * Land-gate refusal decision: an unforced HIGH refusal persists the task as
+ * held so the loop stops re-selecting it. Returns the patch to persist, or null
+ * when there is nothing to hold (non-HIGH, or force=true). Force semantics are
+ * untouched — this only records the already-human-gated refusal.
+ */
+export function highHoldPatch(level: string, force: boolean, reasons: string[]): { status: "held"; hold_reason: string } | null {
+  if (level !== "HIGH" || force) return null;
+  return { status: "held", hold_reason: sanitizeMetaValue((reasons || []).join("; ")) };
+}
+
+/**
+ * Clearing decision for a hold: an explicit unhold returns the task to the
+ * actionable set (assigned if it had an assignee, else open), while an already
+ * merged branch is landed and becomes done. The reason is always wiped.
+ */
+export function clearHoldPatch(t: Pick<Task, "assignee">, merged = false): { status: string; hold_reason: string } {
+  return { status: merged ? "done" : t.assignee ? "assigned" : "open", hold_reason: "" };
 }
 
 /**

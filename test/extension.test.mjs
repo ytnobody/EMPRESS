@@ -17,6 +17,8 @@ const EXPECTED_NAMES = [
   "empress_readiness",
   "empress_apply_clarification",
   "empress_assign_task",
+  "empress_hold_task",
+  "empress_unhold_task",
   "empress_create_worktree",
   "empress_spawn_engineers",
   "empress_check_ci",
@@ -52,6 +54,6 @@ test("extension: factory registers every empress_* tool exactly once, no drops",
   }
 
   const names = tools.map((t) => t.name).sort();
-  // Exactly the 26 tools develop registered — no missing, none extra, no dupes.
+  // Exactly the registered set — no missing, none extra, no dupes.
   assert.deepEqual(names, EXPECTED_NAMES);
 });

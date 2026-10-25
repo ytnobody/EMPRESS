@@ -16,7 +16,7 @@ import { loadConfig, type LoadedConfig } from "../shared/config.ts";
 import { shouldStallKill } from "../domain/stall.ts";
 import { readLoopState, patchLoopState, type LoopStatePatch } from "./state.ts";
 import { tasksHash } from "../domain/wake.ts";
-import { listTasks, getTask, addComment, hasHumanReply, detectLanguage, type Task } from "../domain/tasks.ts";
+import { listTasks, getTask, addComment, hasHumanReply, detectLanguage, isHeld, updateTask, clearHoldPatch, type Task } from "../domain/tasks.ts";
 import { checkReadyTasks, nextJevFailures, JEV_DEGRADED_REASON, postClarifyProposals } from "../domain/readiness.ts";
 import { mergeConflict } from "../domain/git.ts";
 import { run } from "../shared/shell.ts";
@@ -195,7 +195,9 @@ async function handleResult(cwd: string, res: RunPassResult, started: string, pa
 function escalateConflictedHeld(cwd: string, config: LoadedConfig): void {
   const base = config.project?.base_branch || "develop";
   const marker = "empress:held-conflict";
-  const open = listTasks(cwd, { includeAll: true }).filter((t) => t.status !== "done" && t.branch);
+  // A task already held for a human is left untouched until the human acts —
+  // re-engaging it here is exactly the verify-hold churn held status prevents.
+  const open = listTasks(cwd, { includeAll: true }).filter((t) => t.status !== "done" && t.branch && !isHeld(t));
   for (const t of open) {
     try {
       if (mergeConflict(cwd, base, t.branch)) {
@@ -213,6 +215,11 @@ function escalateConflictedHeld(cwd: string, config: LoadedConfig): void {
       /* skip */
     }
   }
+}
+
+/** True when the branch tip is already an ancestor of base (merged by a human). */
+function branchMergedInto(cwd: string, base: string, branch: string): boolean {
+  return run("git", ["-C", cwd, "merge-base", "--is-ancestor", branch, base]).code === 0;
 }
 
 function hasMarker(t: Task, marker: string): boolean {
@@ -251,7 +258,7 @@ function heldFixCandidates(cwd: string, config: LoadedConfig): number[] {
   const MAX = 3;
   const out: number[] = [];
   for (const t of listTasks(cwd, { includeAll: true })) {
-    if (t.status === "done" || !t.branch) continue;
+    if (t.status === "done" || !t.branch || isHeld(t)) continue;
     try {
       const broken = mergeConflict(cwd, base, t.branch) || branchPrCiFailing(t.branch);
       if (!broken) continue;
@@ -346,9 +353,31 @@ export async function runLoop(
       // reply must still be picked up here on the next wake, or a single human reply
       // could never resolve the task. gh's issue list carries no comments, so tasks
       // needing the reply check are re-read fresh (cheap, deterministic).
+      //
+      // Held tasks (lesson #314) are skipped UNLESS the hold was cleared: a human
+      // reply since the hold, or a branch already merged into base (then the task
+      // is landed and closed as done). This stops a human-gated HIGH task from being
+      // re-selected on every pass while still honouring a human's clearing action.
+      const base = config.project?.base_branch || "develop";
       const actionable: Task[] = [];
       for (const t of listTasks(cwd, { includeAll: true })) {
         if (t.status === "done") continue;
+        if (t.status === "held") {
+          const fresh = getTask(cwd, t.id);
+          if (!fresh) continue;
+          if (fresh.branch && branchMergedInto(cwd, base, fresh.branch)) {
+            updateTask(cwd, fresh.id, clearHoldPatch(fresh, true));
+            console.log(`[wake] held ${config.github?.enabled ? "issue" : "task"} #${fresh.id} branch already merged — cleared hold (done)`);
+            continue;
+          }
+          if (!isHeld(fresh)) {
+            // Human replied => persist the clear so empress_list_tasks (gh list
+            // carries no comments) also surfaces it as actionable this pass.
+            const cleared = updateTask(cwd, fresh.id, clearHoldPatch(fresh));
+            if (cleared) actionable.push(cleared);
+          }
+          continue;
+        }
         if (!t.needs_clarification) {
           actionable.push(t);
         } else {
